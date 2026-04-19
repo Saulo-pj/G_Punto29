@@ -1,0 +1,313 @@
+{% extends 'base.html' %}
+{% block title %}Dashboard Arqueo{% endblock %}
+{% block content %}
+<h1>Dashboard de arqueo de caja</h1>
+<p class="muted">Fecha operativa: {{ selected_date.strftime('%d/%m/%Y') if selected_date else '-' }}</p>
+
+<div class="arqueo-dashboard-grid">
+	<div class="card">
+		<h3>Indicadores principales</h3>
+		<div class="arqueo-kpi-grid">
+			<div class="arqueo-kpi-item">
+				<span class="muted">Cierres</span>
+				<strong>{{ summary.cierres }}</strong>
+			</div>
+			<div class="arqueo-kpi-item">
+				<span class="muted">Venta sistema</span>
+				<strong>{{ '%.2f'|format(summary.total_venta_sistema) }}</strong>
+			</div>
+			<div class="arqueo-kpi-item">
+				<span class="muted">Ingresos declarados</span>
+				<strong>{{ '%.2f'|format(summary.total_ingresos) }}</strong>
+			</div>
+			<div class="arqueo-kpi-item">
+				<span class="muted">Balance diferencia</span>
+				<strong class="{% if summary.total_diferencia < 0 %}kpi-neg{% elif summary.total_diferencia > 0 %}kpi-pos{% endif %}">{{ '%.2f'|format(summary.total_diferencia) }}</strong>
+			</div>
+			<div class="arqueo-kpi-item">
+				<span class="muted">Sobrantes</span>
+				<strong class="kpi-pos">{{ summary.sobrantes }}</strong>
+			</div>
+			<div class="arqueo-kpi-item">
+				<span class="muted">Faltantes</span>
+				<strong class="kpi-neg">{{ summary.faltantes }}</strong>
+			</div>
+		</div>
+	</div>
+
+	<div class="card">
+		<h3>Comparativo de cierres</h3>
+		{% if comparacion %}
+		<div class="arqueo-compare">
+			<div>
+				<p><strong>Referencia:</strong> {{ comparacion.reference.sede.nombre_sede if comparacion.reference.sede else comparacion.reference.arqueo.id_sede }} / {{ comparacion.reference.turno.nombre_turno if comparacion.reference.turno else comparacion.reference.arqueo.id_turno }}</p>
+				<p class="muted">Diferencia: {{ '%.2f'|format(comparacion.reference.diferencia) }}</p>
+			</div>
+			<div>
+				<p><strong>Comparado con:</strong> {{ comparacion.target.sede.nombre_sede if comparacion.target.sede else comparacion.target.arqueo.id_sede }} / {{ comparacion.target.turno.nombre_turno if comparacion.target.turno else comparacion.target.arqueo.id_turno }}</p>
+				<p class="muted">Diferencia: {{ '%.2f'|format(comparacion.target.diferencia) }}</p>
+			</div>
+		</div>
+		<p>
+			<strong>Gap diferencia:</strong>
+			<span class="{% if comparacion.gap_diferencia < 0 %}kpi-neg{% elif comparacion.gap_diferencia > 0 %}kpi-pos{% endif %}">{{ '%.2f'|format(comparacion.gap_diferencia) }}</span>
+		</p>
+		<p>
+			<strong>Gap venta sistema:</strong>
+			<span class="{% if comparacion.gap_venta_sistema < 0 %}kpi-neg{% elif comparacion.gap_venta_sistema > 0 %}kpi-pos{% endif %}">{{ '%.2f'|format(comparacion.gap_venta_sistema) }}</span>
+		</p>
+		{% else %}
+		<p class="muted">No hay suficientes datos para comparar otra sede/turno en esta fecha.</p>
+		{% endif %}
+	</div>
+</div>
+
+<div class="inventory-table-wrap mt-3">
+	<table class="inventory-table arqueo-dashboard-table">
+		<thead>
+			<tr>
+				<th>ID</th>
+				<th>Sede</th>
+				<th>Turno</th>
+				<th>Venta sistema</th>
+				<th>Ingresos</th>
+				<th>Gastos</th>
+				<th>Subtotal</th>
+				<th>Diferencia</th>
+				<th>Estado</th>
+			</tr>
+		</thead>
+		<tbody>
+			{% for item in rows_stats %}
+			<tr>
+				<td>{{ item.arqueo.id_arqueo }}</td>
+				<td>{{ item.sede.nombre_sede if item.sede else item.arqueo.id_sede }}</td>
+				<td>{{ item.turno.nombre_turno if item.turno else item.arqueo.id_turno }}</td>
+				<td>{{ '%.2f'|format(item.arqueo.venta_sistema or 0) }}</td>
+				<td>{{ '%.2f'|format(item.total_ingresos) }}</td>
+				<td>{{ '%.2f'|format(item.gastos_totales) }}</td>
+				<td>{{ '%.2f'|format(item.subtotal) }}</td>
+				<td>{{ '%.2f'|format(item.diferencia) }}</td>
+				<td>
+					<span class="status-pill {% if item.diferencia > 0 %}ok{% elif item.diferencia < 0 %}error{% endif %}">{{ item.estado }}</span>
+				</td>
+			</tr>
+			{% else %}
+			<tr><td colspan="9">Sin cierres cargados para esta fecha.</td></tr>
+			{% endfor %}
+		</tbody>
+	</table>
+</div>
+
+<div class="card mt-3">
+	<h3>Comparacion de turnos por sede</h3>
+	<div class="inventory-table-wrap">
+		<table class="inventory-table arqueo-dashboard-table">
+			<thead>
+				<tr>
+					<th>Sede</th>
+					<th>Turno A</th>
+					<th>Diferencia A</th>
+					<th>Turno B</th>
+					<th>Diferencia B</th>
+					<th>Gap diferencia</th>
+					<th>Gap venta sistema</th>
+				</tr>
+			</thead>
+			<tbody>
+				{% for cmp in comparacion_turnos %}
+				<tr>
+					<td>{{ cmp.sede }}</td>
+					<td>{{ cmp.reference_turno }}</td>
+					<td>{{ '%.2f'|format(cmp.reference_diferencia) }}</td>
+					<td>{{ cmp.target_turno }}</td>
+					<td>{{ '%.2f'|format(cmp.target_diferencia) }}</td>
+					<td class="{% if cmp.gap_diferencia < 0 %}kpi-neg{% elif cmp.gap_diferencia > 0 %}kpi-pos{% endif %}">{{ '%.2f'|format(cmp.gap_diferencia) }}</td>
+					<td class="{% if cmp.gap_venta < 0 %}kpi-neg{% elif cmp.gap_venta > 0 %}kpi-pos{% endif %}">{{ '%.2f'|format(cmp.gap_venta) }}</td>
+				</tr>
+				{% else %}
+				<tr><td colspan="7">No hay suficientes turnos cargados por sede para comparar.</td></tr>
+				{% endfor %}
+			</tbody>
+		</table>
+	</div>
+</div>
+
+<div class="arqueo-chart-grid mt-3">
+	<div class="card chart-card chart-card-wide">
+		<h3>Ganancia y gastos: semana vs mes</h3>
+		<div class="chart-canvas-wrap">
+			<canvas id="chart-ganancia-gastos"></canvas>
+		</div>
+	</div>
+	<div class="card chart-card">
+		<h3>Venta vs Recaudacion por sede</h3>
+		<div class="chart-canvas-wrap">
+			<canvas id="chart-bar-venta"></canvas>
+		</div>
+	</div>
+	<div class="card chart-card">
+		<h3>Mix de pagos</h3>
+		<div class="chart-canvas-wrap">
+			<canvas id="chart-pie-mix"></canvas>
+		</div>
+	</div>
+	<div class="card chart-card">
+		<h3>Tendencia de gastos por sede</h3>
+		<div class="chart-canvas-wrap">
+			<canvas id="chart-line-gastos"></canvas>
+		</div>
+	</div>
+	<div class="card chart-card">
+		<h3>Benchmark de sedes</h3>
+		<div class="chart-canvas-wrap">
+			<canvas id="chart-benchmark"></canvas>
+		</div>
+	</div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+	(function () {
+		if (typeof Chart === 'undefined') {
+			return;
+		}
+
+		var barData = {{ chart_bar|tojson }};
+		var pieData = {{ chart_pie|tojson }};
+		var trendData = {{ chart_trend|tojson }};
+		var benchmarkData = {{ chart_benchmark|tojson }};
+		var gananciasData = {{ chart_ganancia_gastos|tojson }};
+
+		var commonGrid = {
+			drawBorder: false,
+			color: 'rgba(74, 74, 74, 0.15)'
+		};
+
+		var barCtx = document.getElementById('chart-bar-venta');
+		var gananciasCtx = document.getElementById('chart-ganancia-gastos');
+		if (gananciasCtx) {
+			new Chart(gananciasCtx, {
+				type: 'bar',
+				data: {
+					labels: gananciasData.labels || [],
+					datasets: [
+						{
+							label: 'Ganancia',
+							data: gananciasData.ganancia || [],
+							backgroundColor: '#E6C682',
+							borderRadius: 8
+						},
+						{
+							label: 'Gastos',
+							data: gananciasData.gastos || [],
+							backgroundColor: '#4A4A4A',
+							borderRadius: 8
+						}
+					]
+				},
+				options: {
+					responsive: true,
+					maintainAspectRatio: false,
+					scales: {
+						x: { grid: commonGrid },
+						y: { grid: commonGrid, beginAtZero: true }
+					}
+				}
+			});
+		}
+
+		if (barCtx) {
+			new Chart(barCtx, {
+				type: 'bar',
+				data: {
+					labels: barData.labels || [],
+					datasets: [
+						{
+							label: 'Venta sistema',
+							data: barData.venta_sistema || [],
+							backgroundColor: '#4A4A4A',
+							borderRadius: 8
+						},
+						{
+							label: 'Recaudacion real',
+							data: barData.recaudacion_real || [],
+							backgroundColor: '#E6C682',
+							borderRadius: 8
+						}
+					]
+				},
+				options: {
+					responsive: true,
+					maintainAspectRatio: false,
+					scales: {
+						x: { grid: commonGrid },
+						y: { grid: commonGrid, beginAtZero: true }
+					}
+				}
+			});
+		}
+
+		var pieCtx = document.getElementById('chart-pie-mix');
+		if (pieCtx) {
+			new Chart(pieCtx, {
+				type: 'doughnut',
+				data: {
+					labels: pieData.labels || [],
+					datasets: [{
+						data: pieData.values || [],
+						backgroundColor: ['#4A4A4A', '#E6C682', '#2D2D2D'],
+						borderColor: '#F8F5F0',
+						borderWidth: 2
+					}]
+				},
+				options: {
+					responsive: true,
+					maintainAspectRatio: false,
+				}
+			});
+		}
+
+		var trendCtx = document.getElementById('chart-line-gastos');
+		if (trendCtx) {
+			new Chart(trendCtx, {
+				type: 'line',
+				data: trendData,
+				options: {
+					responsive: true,
+					maintainAspectRatio: false,
+					scales: {
+						x: { grid: commonGrid },
+						y: { grid: commonGrid, beginAtZero: true }
+					}
+				}
+			});
+		}
+
+		var benchmarkCtx = document.getElementById('chart-benchmark');
+		if (benchmarkCtx) {
+			new Chart(benchmarkCtx, {
+				type: 'bar',
+				data: {
+					labels: benchmarkData.labels || [],
+					datasets: [{
+						label: 'Indice de cuadre (%)',
+						data: benchmarkData.values || [],
+						backgroundColor: '#B98E38',
+						borderRadius: 8
+					}]
+				},
+				options: {
+					indexAxis: 'y',
+					responsive: true,
+					maintainAspectRatio: false,
+					scales: {
+						x: { grid: commonGrid, beginAtZero: true },
+						y: { grid: commonGrid }
+					}
+				}
+			});
+		}
+	})();
+</script>
+{% endblock %}

@@ -1,0 +1,258 @@
+{% extends 'base.html' %}
+{% block title %}Arqueo Caja{% endblock %}
+{% block content %}
+<h1>Cierre de caja</h1>
+<div class="inventory-actions-top">
+	<a class="btn-outline" href="{{ url_for('arqueo_dashboard') }}">Ver dashboard de arqueo</a>
+</div>
+
+{% if is_admin_general %}
+<form method="GET" class="inline-form">
+	<div>
+		<label>Sede</label>
+		<select name="sede" required>
+			{% for s in sedes_disponibles %}
+			<option value="{{ s.id_sede }}" {% if s.id_sede == target_sede_id %}selected{% endif %}>{{ s.nombre_sede }}</option>
+			{% endfor %}
+		</select>
+	</div>
+	<div>
+		<label>Turno</label>
+		<select name="turno" required>
+			{% for t in turnos_disponibles %}
+			<option value="{{ t.id_turno }}" {% if t.id_turno == target_turno_id %}selected{% endif %}>{{ t.nombre_turno }} ({{ t.id_turno }})</option>
+			{% endfor %}
+		</select>
+	</div>
+	<div>
+		<label>&nbsp;</label>
+		<button type="submit">Ver cierre</button>
+	</div>
+</form>
+{% endif %}
+
+{% if can_insert or can_update %}
+<form method="POST" class="card cierre-caja-form">
+	<h3>Resumen operativo por sede y turno</h3>
+	<p class="muted">Todos los admin sala de la misma sede y turno comparten este mismo cierre.</p>
+	<div>
+		<label>Monto inicial (Base)</label>
+		<input type="number" step="0.01" name="monto_inicial" value="{{ cierre.monto_inicial if cierre else 0 }}" required>
+	</div>
+
+	<h3>Gastos operativos</h3>
+	<div id="gastos-list" class="gastos-list">
+		{% if gastos_actuales %}
+			{% for g in gastos_actuales %}
+			<div class="gasto-item">
+				<input type="text" name="gasto_nombre[]" value="{{ g.nombre }}" placeholder="Nombre del gasto">
+				<input type="number" step="0.01" name="gasto_monto[]" value="{{ g.monto }}" placeholder="Monto">
+				<button type="button" class="btn-danger remove-gasto">Eliminar</button>
+			</div>
+			{% endfor %}
+		{% else %}
+			<div class="gasto-item">
+				<input type="text" name="gasto_nombre[]" placeholder="Nombre del gasto">
+				<input type="number" step="0.01" name="gasto_monto[]" placeholder="Monto">
+				<button type="button" class="btn-danger remove-gasto">Eliminar</button>
+			</div>
+		{% endif %}
+	</div>
+	<button type="button" id="add-gasto-btn" class="btn-outline">Agregar gasto</button>
+
+	<h3>Ingresos por canales</h3>
+	<div class="grid-2">
+		<div class="ingreso-canal-item">
+			<label class="canal-label" for="pos_tarjetas">POS (Tarjetas)</label>
+			<div class="canal-control">
+				<img class="canal-icon" src="{{ url_for('static', filename='img/visa.png') }}" alt="Tarjetas">
+				<input id="pos_tarjetas" type="number" step="0.01" name="pos_tarjetas" value="{{ cierre.pos_tarjetas if cierre else 0 }}" required>
+			</div>
+		</div>
+		<div class="ingreso-canal-item">
+			<label class="canal-label" for="yape">Yape</label>
+			<div class="canal-control">
+				<img class="canal-icon" src="{{ url_for('static', filename='img/logo-yape.png') }}" alt="Yape">
+				<input id="yape" type="number" step="0.01" name="yape" value="{{ cierre.yape if cierre else 0 }}" required>
+			</div>
+		</div>
+		<div class="ingreso-canal-item">
+			<label class="canal-label" for="plin">Plin</label>
+			<div class="canal-control">
+				<img class="canal-icon" src="{{ url_for('static', filename='img/logo-plin.png') }}" alt="Plin">
+				<input id="plin" type="number" step="0.01" name="plin" value="{{ cierre.plin if cierre else 0 }}" required>
+			</div>
+		</div>
+		<div class="ingreso-canal-item">
+			<label class="canal-label" for="efectivo">Efectivo</label>
+			<div class="canal-control">
+				<img class="canal-icon" src="{{ url_for('static', filename='img/dinero-en-efectivo.png') }}" alt="Efectivo">
+				<input id="efectivo" type="number" step="0.01" name="efectivo" value="{{ cierre.efectivo if cierre else 0 }}" required>
+			</div>
+		</div>
+	</div>
+
+	<label>Observaciones</label>
+	<textarea name="observaciones" rows="3">{{ cierre.observaciones if cierre else '' }}</textarea>
+
+	<label>Venta del sistema (POS)</label>
+	<input type="number" step="0.01" name="venta_sistema" value="{{ cierre.venta_sistema if cierre else 0 }}" required>
+
+	<button type="submit">Guardar cierre de caja</button>
+</form>
+{% endif %}
+
+<div class="card mt-3">
+	<h3>Resumen operativo</h3>
+	<div class="grid-2 arqueo-summary-grid">
+		<div><strong>Total ingresos:</strong> <span id="sum-total-ingresos">{{ '%.2f'|format(resumen.total_ingresos) }}</span></div>
+		<div><strong>Gastos totales:</strong> <span id="sum-gastos">{{ '%.2f'|format(resumen.gastos_totales) }}</span></div>
+		<div><strong>Subtotal:</strong> <span id="sum-subtotal">{{ '%.2f'|format(resumen.subtotal) }}</span></div>
+		<div><strong>Total (subtotal - inicial):</strong> <span id="sum-total-operativo">{{ '%.2f'|format(resumen.subtotal - (cierre.monto_inicial if cierre else 0)) }}</span></div>
+		<div><strong>Diferencia vs sistema:</strong>
+			<span id="sum-diferencia-pill" class="status-pill {% if resumen.diferencia > 0 %}ok{% elif resumen.diferencia < 0 %}error{% endif %}">
+				{% if resumen.diferencia > 0 %}
+					Sobrante {{ '%.2f'|format(resumen.diferencia) }}
+				{% elif resumen.diferencia < 0 %}
+					Faltante {{ '%.2f'|format(resumen.diferencia) }}
+				{% else %}
+					Cuadre exacto 0.00
+				{% endif %}
+			</span>
+		</div>
+	</div>
+</div>
+
+<div class="inventory-table-wrap mt-3">
+	<table class="inventory-table">
+		<thead>
+			<tr>
+				<th>ID</th>
+				<th>Sede</th>
+				<th>Turno</th>
+				<th>Base</th>
+				<th>Venta sistema</th>
+				<th>Subtotal</th>
+				<th>Fecha</th>
+			</tr>
+		</thead>
+		<tbody>
+			{% for a in historial_cierres %}
+			<tr>
+				<td>{{ a.id_arqueo }}</td>
+				<td>{{ a.id_sede }}</td>
+				<td>{{ a.id_turno }}</td>
+				<td>{{ '%.2f'|format(a.monto_inicial or 0) }}</td>
+				<td>{{ '%.2f'|format(a.venta_sistema or 0) }}</td>
+				<td>{{ '%.2f'|format(a.monto_final or 0) }}</td>
+				<td>{{ a.fecha }}</td>
+			</tr>
+			{% else %}
+			<tr><td colspan="7">Sin cierres para esta sede/turno/fecha.</td></tr>
+			{% endfor %}
+		</tbody>
+	</table>
+</div>
+
+<script>
+	(function () {
+		var list = document.getElementById('gastos-list');
+		var addBtn = document.getElementById('add-gasto-btn');
+		var totalIngresosEl = document.getElementById('sum-total-ingresos');
+		var gastosEl = document.getElementById('sum-gastos');
+		var subtotalEl = document.getElementById('sum-subtotal');
+		var totalOperativoEl = document.getElementById('sum-total-operativo');
+		var diferenciaPill = document.getElementById('sum-diferencia-pill');
+		if (!list || !addBtn) {
+			return;
+		}
+
+		function toNum(value) {
+			var n = parseFloat(value);
+			return Number.isFinite(n) ? n : 0;
+		}
+
+		function updateSummary() {
+			var montoInicial = toNum(document.querySelector('input[name="monto_inicial"]') && document.querySelector('input[name="monto_inicial"]').value);
+			var ventaSistema = toNum(document.querySelector('input[name="venta_sistema"]') && document.querySelector('input[name="venta_sistema"]').value);
+			var pos = toNum(document.querySelector('input[name="pos_tarjetas"]') && document.querySelector('input[name="pos_tarjetas"]').value);
+			var yape = toNum(document.querySelector('input[name="yape"]') && document.querySelector('input[name="yape"]').value);
+			var plin = toNum(document.querySelector('input[name="plin"]') && document.querySelector('input[name="plin"]').value);
+			var efectivo = toNum(document.querySelector('input[name="efectivo"]') && document.querySelector('input[name="efectivo"]').value);
+
+			var totalGastos = 0;
+			list.querySelectorAll('input[name="gasto_monto[]"]').forEach(function (input) {
+				totalGastos += toNum(input.value);
+			});
+
+			var totalIngresos = pos + yape + plin + efectivo;
+			var subtotal = totalIngresos + totalGastos;
+			var totalOperativo = subtotal - montoInicial;
+			var diferencia = (subtotal - montoInicial) - ventaSistema;
+
+			if (totalIngresosEl) totalIngresosEl.textContent = totalIngresos.toFixed(2);
+			if (gastosEl) gastosEl.textContent = totalGastos.toFixed(2);
+			if (subtotalEl) subtotalEl.textContent = subtotal.toFixed(2);
+			if (totalOperativoEl) totalOperativoEl.textContent = totalOperativo.toFixed(2);
+
+			if (diferenciaPill) {
+				diferenciaPill.classList.remove('ok', 'error');
+				if (diferencia > 0) {
+					diferenciaPill.classList.add('ok');
+					diferenciaPill.textContent = 'Sobrante ' + diferencia.toFixed(2);
+				} else if (diferencia < 0) {
+					diferenciaPill.classList.add('error');
+					diferenciaPill.textContent = 'Faltante ' + diferencia.toFixed(2);
+				} else {
+					diferenciaPill.textContent = 'Cuadre exacto 0.00';
+				}
+			}
+		}
+
+		function bindRemove(scope) {
+			var removeButtons = scope.querySelectorAll('.remove-gasto');
+			removeButtons.forEach(function (btn) {
+				btn.addEventListener('click', function () {
+					var row = btn.closest('.gasto-item');
+					if (!row) return;
+					if (list.querySelectorAll('.gasto-item').length === 1) {
+						row.querySelector('input[name="gasto_nombre[]"]').value = '';
+						row.querySelector('input[name="gasto_monto[]"]').value = '';
+						updateSummary();
+						return;
+					}
+					row.remove();
+					updateSummary();
+				});
+			});
+		}
+
+		addBtn.addEventListener('click', function () {
+			var row = document.createElement('div');
+			row.className = 'gasto-item';
+			row.innerHTML = '' +
+				'<input type="text" name="gasto_nombre[]" placeholder="Nombre del gasto">' +
+				'<input type="number" step="0.01" name="gasto_monto[]" placeholder="Monto">' +
+				'<button type="button" class="btn-danger remove-gasto">Eliminar</button>';
+			list.appendChild(row);
+			bindRemove(row);
+			updateSummary();
+		});
+
+		document.querySelectorAll(
+			'input[name="monto_inicial"], input[name="venta_sistema"], input[name="pos_tarjetas"], input[name="yape"], input[name="plin"], input[name="efectivo"]'
+		).forEach(function (input) {
+			input.addEventListener('input', updateSummary);
+		});
+
+		list.addEventListener('input', function (event) {
+			if (event.target && event.target.name === 'gasto_monto[]') {
+				updateSummary();
+			}
+		});
+
+		bindRemove(document);
+		updateSummary();
+	})();
+</script>
+{% endblock %}

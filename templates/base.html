@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#101828">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Punto 29">
+    <title>{% block title %}Sistema{% endblock %}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400..900&family=Poppins:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,100;1,200;1,300;1,400;1,500;1,600;1,700;1,800;1,900&family=Zen+Dots&display=swap" rel="stylesheet">
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='img/icono.png') }}">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='img/icono.png') }}">
+    <link rel="manifest" href="{{ url_for('manifest') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <script>
+        window.INVENTORY_AREA_OPTIONS = {{ areas_subareas|tojson if areas_subareas is defined else '{}' }};
+    </script>
+    <script defer src="{{ url_for('static', filename='js/inventario.js') }}"></script>
+</head>
+<body>
+    <div class="app-shell">
+        <aside class="sidebar">
+            <div class="sidebar-logo">
+                <img src="{{ url_for('static', filename='img/logo.png') }}" alt="Punto 29 Logo">
+            </div>
+            <a class="user-card profile-card-link" href="{{ url_for('perfil') }}" title="Ver mi perfil">
+                <div class="avatar">U</div>
+                <div class="user-name">{{ current_user.username }}</div>
+                <div class="user-role">{{ current_user.rol_nombre }}</div>
+                <div class="user-meta">{{ current_user.sede.nombre_sede if current_user.sede else 'Sin sede' }}</div>
+                <div class="user-meta">{{ current_user.turno_nombre if current_user.turno_nombre else 'Sin turno' }}</div>
+            </a>
+
+            <nav class="menu">
+                {% for view, label in allowed_views %}
+                    {% if view == 'dashboard' %}
+                        <a href="{{ url_for('dashboard') }}">{{ label }}</a>
+                    {% elif view == 'inventario' %}
+                        <a href="{{ url_for('inventario') }}">{{ label }}</a>
+                    {% elif view == 'inventario_dashboard' %}
+                        <a href="{{ url_for('inventario_dashboard') }}">{{ label }}</a>
+                    {% elif view == 'movimientos' %}
+                        <a href="{{ url_for('movimientos') }}">{{ label }}</a>
+                    {% elif view == 'pedidos' %}
+                        <a href="{{ url_for('pedidos') }}">{{ label }}</a>
+                    {% elif view == 'checklist' %}
+                        <a href="{{ url_for('checklist') }}">{{ label }}</a>
+                    {% elif view == 'arqueo' %}
+                        <a href="{{ url_for('arqueo') }}">{{ label }}</a>
+                    {% elif view == 'ajustes' %}
+                        <a href="{{ url_for('ajustes') }}">{{ label }}</a>
+                    {% endif %}
+                {% endfor %}
+            </nav>
+            <a class="logout" href="{{ url_for('logout') }}">Cerrar sesion</a>
+        </aside>
+        <button id="mobile-menu-btn" class="mobile-menu-btn" type="button" aria-label="Abrir menu">
+            <span></span><span></span><span></span>
+        </button>
+        <button id="sidebar-backdrop" class="sidebar-backdrop" type="button" aria-label="Cerrar menu"></button>
+
+        <main class="content">
+            <header class="topbar">
+                <div class="logo-box">
+                    <img src="{{ url_for('static', filename='img/logo.png') }}" alt="Punto 29 Logo">
+                </div>
+                <form class="date-box-form" method="POST" action="{{ url_for('set_app_date') }}">
+                    <input type="date" id="app-date-input" name="app_date" value="{{ today_value }}">
+                    <button id="app-date-button" class="date-box" type="button">{{ today_text }}</button>
+                </form>
+            </header>
+
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    <section class="alerts">
+                        {% for category, message in messages %}
+                            <div class="alert {{ category }}">{{ message }}</div>
+                        {% endfor %}
+                    </section>
+                {% endif %}
+            {% endwith %}
+
+            <section class="panel">
+                {% block content %}{% endblock %}
+            </section>
+        </main>
+    </div>
+    <script>
+        (function () {
+            var sidebar = document.querySelector('.sidebar');
+            var menuBtn = document.getElementById('mobile-menu-btn');
+            var backdrop = document.getElementById('sidebar-backdrop');
+            if (!sidebar || !menuBtn || !backdrop) {
+                return;
+            }
+
+            function closeMenu() {
+                sidebar.classList.remove('is-open');
+                backdrop.classList.remove('is-open');
+                document.body.classList.remove('menu-open');
+            }
+
+            function toggleMenu() {
+                var open = sidebar.classList.toggle('is-open');
+                backdrop.classList.toggle('is-open', open);
+                document.body.classList.toggle('menu-open', open);
+            }
+
+            menuBtn.addEventListener('click', toggleMenu);
+            backdrop.addEventListener('click', closeMenu);
+            window.addEventListener('resize', function () {
+                if (window.innerWidth > 900) {
+                    closeMenu();
+                }
+            });
+        })();
+    </script>
+    <script>
+        (function () {
+            var form = document.querySelector('.date-box-form');
+            var button = document.getElementById('app-date-button');
+            var input = document.getElementById('app-date-input');
+            if (!form || !button || !input) {
+                return;
+            }
+
+            function openPicker() {
+                if (typeof input.showPicker === 'function') {
+                    input.showPicker();
+                } else {
+                    input.click();
+                }
+     }
+
+            button.addEventListener('click', openPicker);
+            input.addEventListener('change', function () {
+                form.submit();
+            });
+        })();
+    </script>
+    <script>
+        (function () {
+            var container = document.querySelector('.alerts');
+            if (!container) {
+                return;
+            }
+
+            var alerts = container.querySelectorAll('.alert');
+            if (!alerts.length) {
+                return;
+            }
+
+            function removeAlert(alertEl) {
+                alertEl.classList.add('is-leaving');
+                window.setTimeout(function () {
+                    if (alertEl && alertEl.parentNode) {
+                        alertEl.parentNode.removeChild(alertEl);
+                    }
+                    if (!container.children.length && container.parentNode) {
+                        container.parentNode.removeChild(container);
+                    }
+                }, 220);
+            }
+
+            for (var i = 0; i < alerts.length; i += 1) {
+                (function (alertEl, index) {
+                    window.setTimeout(function () {
+                        removeAlert(alertEl);
+                    }, 1000 + index * 120);
+                })(alerts[i], i);
+            }
+        })();
+    </script>
+    <script>
+        (function () {
+            if (!('serviceWorker' in navigator)) {
+                return;
+            }
+            window.addEventListener('load', function () {
+                navigator.serviceWorker.register('{{ url_for('service_worker') }}?v=20260418-2').then(function (registration) {
+                    registration.update();
+                    if (registration.waiting) {
+                        registration.waiting.postMessage({ type: 'SKIP_WAITING' });
+                    }
+                    registration.addEventListener('updatefound', function () {
+                        var worker = registration.installing;
+                        if (!worker) {
+                            return;
+                        }
+                        worker.addEventListener('statechange', function () {
+                            if (worker.state === 'installed' && navigator.serviceWorker.controller) {
+                                worker.postMessage({ type: 'SKIP_WAITING' });
+                            }
+                        });
+                    });
+                    navigator.serviceWorker.addEventListener('controllerchange', function () {
+                        window.location.reload();
+                    });
+                }).catch(function () {
+                    // Registro silencioso: si falla, la app sigue funcionando como web normal.
+                });
+            });
+        })();
+    </script>
+</body>
+</html>

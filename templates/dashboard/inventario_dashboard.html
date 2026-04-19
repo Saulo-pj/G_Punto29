@@ -1,0 +1,178 @@
+{% extends 'base.html' %}
+{% block title %}Dashboard Inventario{% endblock %}
+{% block content %}
+<h1>Dashboard de inventario</h1>
+<p class="muted">Analitica de salidas y alertas de stock al {{ selected_date.strftime('%d/%m/%Y') if selected_date else '-' }}.</p>
+
+<div class="inventory-dashboard-grid">
+	<div class="card inventory-kpi-card">
+		<span class="muted">Items monitoreados</span>
+		<strong>{{ metrics.kpis.total_items }}</strong>
+	</div>
+	<div class="card inventory-kpi-card warn">
+		<span class="muted">Por acabarse</span>
+		<strong>{{ metrics.kpis.por_acabarse }}</strong>
+	</div>
+	<div class="card inventory-kpi-card danger">
+		<span class="muted">Acabados</span>
+		<strong>{{ metrics.kpis.acabados }}</strong>
+	</div>
+	<div class="card inventory-kpi-card ok">
+		<span class="muted">Abastecidos</span>
+		<strong>{{ metrics.kpis.abastecidos }}</strong>
+	</div>
+</div>
+
+<div class="arqueo-chart-grid mt-3">
+	<div class="card chart-card chart-card-wide">
+		<h3>Productos que mas salen (ultimos 30 dias)</h3>
+		<div class="chart-canvas-wrap">
+			<canvas id="chart-top-salidas"></canvas>
+		</div>
+	</div>
+	<div class="card chart-card">
+		<h3>Estado general del stock</h3>
+		<div class="chart-canvas-wrap">
+			<canvas id="chart-stock-estado"></canvas>
+		</div>
+	</div>
+</div>
+
+<div class="card mt-3">
+	<h3>Ranking de productos con mayor salida</h3>
+	<div class="inventory-table-wrap">
+		<table class="inventory-table">
+			<thead>
+				<tr>
+					<th>ID</th>
+					<th>Producto</th>
+					<th>Total salida</th>
+				</tr>
+			</thead>
+			<tbody>
+				{% for item in metrics.top_salidas %}
+				<tr>
+					<td>{{ item.id_producto }}</td>
+					<td>{{ item.nombre_producto or '-' }}</td>
+					<td>{{ '%.2f'|format(item.total_salida or 0) }}</td>
+				</tr>
+				{% else %}
+				<tr><td colspan="3">Sin salidas registradas en los ultimos 30 dias.</td></tr>
+				{% endfor %}
+			</tbody>
+		</table>
+	</div>
+</div>
+
+<div class="grid-2 mt-3">
+	<section class="card inventory-alert-card">
+		<h3>Productos por acabarse</h3>
+		<div class="inventory-table-wrap compact">
+			<table class="inventory-table">
+				<thead>
+					<tr>
+						<th>ID</th>
+						<th>Producto</th>
+						<th>Stock</th>
+						<th>Minimo</th>
+					</tr>
+				</thead>
+				<tbody>
+					{% for producto, inv, sede in metrics.por_acabarse %}
+					<tr>
+						<td>{{ producto.id_producto }}</td>
+						<td>{{ producto.nombre_producto }}</td>
+						<td>{{ inv.stock_actual }}</td>
+						<td>{{ inv.punto_minimo }}</td>
+					</tr>
+					{% else %}
+					<tr><td colspan="4">No hay productos por acabarse.</td></tr>
+					{% endfor %}
+				</tbody>
+			</table>
+		</div>
+	</section>
+
+	<section class="card inventory-alert-card">
+		<h3>Productos acabados</h3>
+		<div class="inventory-table-wrap compact">
+			<table class="inventory-table">
+				<thead>
+					<tr>
+						<th>ID</th>
+						<th>Producto</th>
+						<th>Stock</th>
+					</tr>
+				</thead>
+				<tbody>
+					{% for producto, inv, sede in metrics.acabados %}
+					<tr>
+						<td>{{ producto.id_producto }}</td>
+						<td>{{ producto.nombre_producto }}</td>
+						<td>{{ inv.stock_actual }}</td>
+					</tr>
+					{% else %}
+					<tr><td colspan="3">No hay productos agotados.</td></tr>
+					{% endfor %}
+				</tbody>
+			</table>
+		</div>
+	</section>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+	(function () {
+		if (typeof Chart === 'undefined') {
+			return;
+		}
+
+		var topData = {{ metrics.chart_top_salidas|tojson }};
+		var stockData = {{ metrics.chart_stock|tojson }};
+
+		var topCtx = document.getElementById('chart-top-salidas');
+		if (topCtx) {
+			new Chart(topCtx, {
+				type: 'bar',
+				data: {
+					labels: topData.labels || [],
+					datasets: [{
+						label: 'Total salida',
+						data: topData.values || [],
+						backgroundColor: '#4A4A4A',
+						borderRadius: 8
+					}]
+				},
+				options: {
+					responsive: true,
+					maintainAspectRatio: false,
+					scales: {
+						x: { grid: { display: false } },
+						y: { beginAtZero: true, grid: { color: 'rgba(74, 74, 74, 0.15)' } }
+					}
+				}
+			});
+		}
+
+		var stockCtx = document.getElementById('chart-stock-estado');
+		if (stockCtx) {
+			new Chart(stockCtx, {
+				type: 'doughnut',
+				data: {
+					labels: stockData.labels || [],
+					datasets: [{
+						data: stockData.values || [],
+						backgroundColor: ['#2E7D32', '#D97706', '#B91C1C'],
+						borderColor: '#F8F5F0',
+						borderWidth: 2
+					}]
+				},
+				options: {
+					responsive: true,
+					maintainAspectRatio: false
+				}
+			});
+		}
+	})();
+</script>
+{% endblock %}

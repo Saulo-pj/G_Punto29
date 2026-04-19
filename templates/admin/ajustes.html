@@ -1,0 +1,81 @@
+{% extends 'base.html' %}
+{% block title %}Ajustes{% endblock %}
+{% block content %}
+<h1>Ajustes del sistema</h1>
+
+<div class="grid-2">
+	<section>
+		<h3>Nueva sede</h3>
+		<form method="POST">
+			<input type="hidden" name="tipo_form" value="sede">
+			<input type="text" name="nombre_sede" placeholder="Nombre sede" required>
+			<button type="submit">Guardar sede</button>
+		</form>
+	</section>
+
+	<section>
+		<h3>Nota</h3>
+		<p>La gestion de productos se realiza desde Inventario.</p>
+	</section>
+</div>
+
+<section>
+	<h3>Nuevo usuario</h3>
+	<form method="POST" class="grid-2">
+		<input type="hidden" name="tipo_form" value="usuario">
+		<input type="text" name="id_usuario" placeholder="ID usuario" required>
+		<input type="text" name="username" placeholder="Username" required>
+		<input type="password" name="password" placeholder="Password temporal" required>
+		<select name="id_rol" required>
+			{% for r in roles %}
+			<option value="{{ r.id_rol }}">{{ r.nombre_rol }}</option>
+			{% endfor %}
+		</select>
+		<select name="id_sede" required>
+			{% for s in sedes %}
+			<option value="{{ s.id_sede }}">{{ s.nombre_sede }}</option>
+			{% endfor %}
+		</select>
+		<select name="id_turno" required>
+			{% for t in turnos %}
+			<option value="{{ t.id_turno }}">{{ t.nombre_turno }}</option>
+			{% endfor %}
+		</select>
+		<button type="submit">Crear usuario</button>
+	</form>
+</section>
+
+<section>
+		<h3>Gestionar usuarios</h3>
+		<p class="muted">Puedes editar ID, username y password. Deja password vacio si no deseas cambiarla.</p>
+		<div class="user-admin-list">
+			{% for u in usuarios %}
+			<div class="user-admin-item">
+				<div class="user-admin-row">
+					<span class="user-admin-name">{{ u.username }}</span>
+					<div class="user-admin-actions">
+						<button type="button" class="icon-action icon-edit" data-target="edit-user-{{ u.id_usuario|replace(' ', '_') }}" title="Editar usuario" aria-label="Editar usuario"></button>
+						<form method="POST" onsubmit="return confirm('Estas seguro de eliminar este usuario?');" class="user-delete-form">
+							<input type="hidden" name="tipo_form" value="delete_usuario">
+							<input type="hidden" name="id_usuario" value="{{ u.id_usuario }}">
+							<button type="submit" class="icon-action icon-delete" title="Eliminar usuario" aria-label="Eliminar usuario">&#128465;</button>
+						</form>
+					</div>
+				</div>
+				<form method="POST" id="edit-user-{{ u.id_usuario|replace(' ', '_') }}" class="user-edit-form is-hidden">
+					<input type="hidden" name="tipo_form" value="update_usuario">
+					<input type="hidden" name="old_id_usuario" value="{{ u.id_usuario }}">
+					<input type="text" name="id_usuario" value="{{ u.id_usuario }}" required>
+					<input type="text" name="username" value="{{ u.username }}" required>
+					<input type="password" name="password" placeholder="Nueva password (opcional)">
+					<div class="muted">Rol actual: {{ u.rol_nombre }}</div>
+					<button type="submit">Guardar cambios</button>
+				</form>
+			</div>
+			{% else %}
+			<p class="muted">Sin usuarios</p>
+			{% endfor %}
+		</div>
+</section>
+
+{% endblock %}

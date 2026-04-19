@@ -1,0 +1,258 @@
+{% extends 'base.html' %}
+{% block title %}Movimientos{% endblock %}
+{% block content %}
+<h1>Movimientos de inventario</h1>
+
+{% if can_insert %}
+<form method="POST">
+	<div class="grid-2">
+		<div>
+			<label>Producto</label>
+			<div class="product-search" data-product-search>
+				<input type="hidden" name="id_producto" id="product-id-input" required>
+				<input type="text" id="product-search-input" class="product-search-input" placeholder="Escribe para buscar producto" autocomplete="off" aria-autocomplete="list" aria-expanded="false">
+				<div id="product-search-results" class="product-search-results is-hidden" role="listbox"></div>
+			</div>
+		</div>
+		<div>
+			<label>Tipo</label>
+			<select name="tipo">
+				<option value="ENTRADA">ENTRADA</option>
+				<option value="SALIDA">SALIDA</option>
+			</select>
+		</div>
+	</div>
+	<label>Cantidad</label>
+	<input type="number" step="0.01" name="cantidad" required>
+	<details class="motivo-panel" open>
+		<summary>Motivo</summary>
+		<div class="motivo-panel-body">
+			<label>Motivo rapido</label>
+			<select name="motivo" id="motivo-select" required>
+				<option value="">Selecciona una opcion</option>
+				<option value="Ajuste">Ajuste</option>
+				<option value="Merma">Merma</option>
+				<option value="Envio a sede">Envio a sede</option>
+				<option value="Recepcion">Recepcion</option>
+				<option value="Inventario físico">Inventario físico</option>
+				<option value="OTRO">Otro</option>
+			</select>
+			<div id="motivo-custom-wrap" class="is-hidden">
+				<label>Nuevo motivo</label>
+				<input type="text" name="motivo_nuevo" id="motivo-custom" placeholder="Escribe un motivo nuevo">
+			</div>
+		</div>
+	</details>
+	<button type="submit" class="btn-registrar">Registrar movimiento</button>
+</form>
+{% endif %}
+
+<form method="GET" class="filters-bar movimientos-filters">
+	<input type="search" name="q" value="{{ selected_q }}" placeholder="Buscar por producto, usuario, tipo o motivo">
+	<select name="tipo">
+		<option value="">Todos los tipos</option>
+		<option value="ENTRADA" {% if selected_tipo == 'ENTRADA' %}selected{% endif %}>ENTRADA</option>
+		<option value="SALIDA" {% if selected_tipo == 'SALIDA' %}selected{% endif %}>SALIDA</option>
+	</select>
+	<select name="categoria">
+		<option value="">Todas las categorias</option>
+		{% for categoria in categorias_filtro %}
+		<option value="{{ categoria }}" {% if selected_categoria == categoria %}selected{% endif %}>{{ categoria }}</option>
+		{% endfor %}
+	</select>
+	<select name="usuario_id">
+		<option value="">Todos los usuarios</option>
+		{% for u in usuarios_filtro %}
+		<option value="{{ u.id_usuario }}" {% if selected_usuario_id == u.id_usuario %}selected{% endif %}>{{ u.username }}</option>
+		{% endfor %}
+	</select>
+	<label>
+		Desde
+		<input type="date" name="fecha_desde" value="{{ selected_fecha_desde }}">
+	</label>
+	<label>
+		Hasta
+		<input type="date" name="fecha_hasta" value="{{ selected_fecha_hasta }}">
+	</label>
+	<button type="submit">Filtrar</button>
+	<a href="{{ url_for('movimientos') }}" class="btn btn-secondary">Limpiar</a>
+</form>
+
+<div class="inventory-table-wrap movimientos-table-wrap">
+	<table class="movimientos-table">
+		<thead>
+			<tr>
+				<th>ID</th>
+				<th>Producto</th>
+				<th>Cantidad</th>
+				<th>Tipo</th>
+				<th>Motivo</th>
+				<th>Usuario</th>
+				<th>Fecha</th>
+			</tr>
+		</thead>
+		<tbody>
+			{% for movimiento, usuario, producto in movimientos %}
+			<tr>
+				<td>{{ movimiento.id_movimiento }}</td>
+				<td>
+					<strong>{{ movimiento.id_producto }}</strong>
+					<div class="muted">{{ producto.nombre_producto if producto else '-' }}</div>
+				</td>
+				<td>{{ movimiento.cantidad }}</td>
+				<td>{{ movimiento.tipo }}</td>
+				<td>{{ movimiento.motivo }}</td>
+				<td>{{ usuario.username if usuario else movimiento.id_usuario or '-' }}</td>
+				<td>{{ movimiento.fecha.strftime('%d/%m/%Y %H:%M') if movimiento.fecha else '-' }}</td>
+			</tr>
+			{% else %}
+			<tr><td colspan="7" class="muted">Sin movimientos con esos filtros.</td></tr>
+			{% endfor %}
+		</tbody>
+	</table>
+</div>
+
+<script>
+	(function () {
+		var products = [
+			{% for p in productos %}
+			{
+				id: {{ p.id_producto|tojson }},
+				name: {{ p.nombre_producto|tojson }},
+				label: {{ (p.id_producto ~ ' - ' ~ p.nombre_producto)|tojson }}
+			}{% if not loop.last %},{% endif %}
+			{% endfor %}
+		];
+		var productSearchInput = document.getElementById('product-search-input');
+		var productIdInput = document.getElementById('product-id-input');
+		var productResults = document.getElementById('product-search-results');
+		var select = document.getElementById('motivo-select');
+		var wrap = document.getElementById('motivo-custom-wrap');
+		var custom = document.getElementById('motivo-custom');
+		if (!productSearchInput || !productIdInput || !productResults || !select || !wrap || !custom) {
+			return;
+		}
+
+		function clearProductValidity() {
+			productSearchInput.setCustomValidity('');
+		}
+
+		function hideResults() {
+			productResults.classList.add('is-hidden');
+			productSearchInput.setAttribute('aria-expanded', 'false');
+		}
+
+		function showResults() {
+			productResults.classList.remove('is-hidden');
+			productSearchInput.setAttribute('aria-expanded', 'true');
+		}
+
+		function selectProduct(product) {
+			productIdInput.value = product.id;
+			productSearchInput.value = product.label;
+			clearProductValidity();
+			hideResults();
+		}
+
+		function renderResults(query) {
+			var normalized = (query || '').trim().toLowerCase();
+			var matches = products.filter(function (product) {
+				return product.label.toLowerCase().includes(normalized) || product.id.toLowerCase().includes(normalized) || product.name.toLowerCase().includes(normalized);
+			}).slice(0, 8);
+
+			productResults.innerHTML = '';
+			if (!normalized) {
+				hideResults();
+				return;
+			}
+
+			if (matches.length === 1 && (matches[0].id.toLowerCase() === normalized || matches[0].label.toLowerCase() === normalized || matches[0].name.toLowerCase() === normalized)) {
+				selectProduct(matches[0]);
+				return;
+			}
+
+			if (matches.length === 0) {
+				productResults.innerHTML = '<div class="product-search-empty">Sin resultados</div>';
+				showResults();
+				productIdInput.value = '';
+				return;
+			}
+
+			matches.forEach(function (product) {
+				var option = document.createElement('button');
+				option.type = 'button';
+				option.className = 'product-search-item';
+				option.textContent = product.label;
+				option.addEventListener('click', function () {
+					selectProduct(product);
+				});
+				productResults.appendChild(option);
+			});
+			showResults();
+		}
+
+		productSearchInput.addEventListener('input', function () {
+			productIdInput.value = '';
+			clearProductValidity();
+			renderResults(productSearchInput.value);
+		});
+
+		productSearchInput.addEventListener('focus', function () {
+			if (productSearchInput.value.trim()) {
+				renderResults(productSearchInput.value);
+			}
+		});
+
+		productSearchInput.addEventListener('blur', function () {
+			window.setTimeout(hideResults, 140);
+			if (!productIdInput.value) {
+				productSearchInput.setCustomValidity('Selecciona un producto de la lista.');
+			}
+		});
+
+		productSearchInput.addEventListener('keydown', function (event) {
+			if (event.key === 'Escape') {
+				hideResults();
+			}
+		});
+
+		document.addEventListener('click', function (event) {
+			if (!event.target.closest('[data-product-search]')) {
+				hideResults();
+			}
+		});
+
+		var form = productSearchInput.closest('form');
+		if (form) {
+			form.addEventListener('submit', function (event) {
+				if (!productIdInput.value) {
+					var exact = products.find(function (product) {
+						var query = productSearchInput.value.trim().toLowerCase();
+						return product.id.toLowerCase() === query || product.label.toLowerCase() === query || product.name.toLowerCase() === query;
+					});
+					if (exact) {
+						selectProduct(exact);
+					} else {
+						productSearchInput.setCustomValidity('Selecciona un producto de la lista.');
+						productSearchInput.reportValidity();
+						event.preventDefault();
+						return;
+					}
+				}
+			});
+		}
+
+		function syncMotivoField() {
+			var isCustom = select.value === 'OTRO';
+			wrap.classList.toggle('is-hidden', !isCustom);
+			custom.required = isCustom;
+			if (!isCustom) {
+				custom.value = '';
+			}
+		}
+
+		select.addEventListener('change', syncMotivoField);
+		syncMotivoField();
+	})();
+</script>
+{% endblock %}

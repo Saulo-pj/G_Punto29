@@ -1,0 +1,359 @@
+{% extends 'base.html' %}
+{% block title %}Inventario{% endblock %}
+{% block content %}
+<h1>Inventario</h1>
+
+<form method="GET" class="inventory-filters">
+	<div>
+		<label>Buscar productos</label>
+		<input type="text" name="q" value="{{ selected_q }}" placeholder="ID, nombre, categoria o subarea">
+	</div>
+	<div>
+		<label>Categoria</label>
+		<select name="categoria">
+			<option value="">Todas</option>
+			{% for c in categorias %}
+			<option value="{{ c.nombre_categoria }}" {% if c.nombre_categoria == selected_categoria %}selected{% endif %}>{{ c.nombre_categoria }}</option>
+			{% endfor %}
+		</select>
+	</div>
+	<div>
+		<label>Area</label>
+		<select name="area">
+			<option value="">Todas</option>
+			{% for a in areas %}
+			<option value="{{ a.nombre_area }}" {% if selected_area == a.nombre_area %}selected{% endif %}>{{ a.nombre_area|title }}</option>
+			{% endfor %}
+		</select>
+	</div>
+	<div>
+		<label>Subarea</label>
+		<select name="subarea">
+			<option value="">Todas</option>
+			{% for s in subareas %}
+			<option value="{{ s }}" {% if s == selected_subarea %}selected{% endif %}>{{ s }}</option>
+			{% endfor %}
+		</select>
+	</div>
+	<div>
+		<label>Unidad</label>
+		<select name="unidad">
+			<option value="">Todas</option>
+			{% for u in unidades %}
+			<option value="{{ u.nombre_unidad }}" {% if u.nombre_unidad == selected_unidad %}selected{% endif %}>{{ u.nombre_unidad }}</option>
+			{% endfor %}
+		</select>
+	</div>
+	<div class="inventory-actions-top">
+		<button type="submit">Filtrar</button>
+		<a class="btn-outline" href="{{ url_for('inventario_export', q=selected_q, categoria=selected_categoria, area=selected_area, subarea=selected_subarea, unidad=selected_unidad) }}">Exportar</a>
+	</div>
+</form>
+
+<div class="inventory-table-wrap">
+<table class="inventory-table">
+	<thead>
+		<tr>
+			<th>ID</th>
+			<th>Producto</th>
+			<th>Categoria</th>
+			<th>Area</th>
+			<th>Subarea</th>
+			<th>Unidad</th>
+			<th>Punto minimo</th>
+			<th>Stock central</th>
+			<th>Estado stock</th>
+			<th>Estado</th>
+			<th>Acciones</th>
+		</tr>
+	</thead>
+	<tbody>
+		{% for prod, inv, sede in inventario_rows %}
+		{% set punto_minimo = inv.punto_minimo if inv else 0 %}
+		{% set stock_actual = inv.stock_actual if inv else 0 %}
+		{% if stock_actual <= 0 %}
+			{% set stock_status = 'Sin stock' %}
+			{% set stock_status_class = 'danger' %}
+		{% elif stock_actual <= punto_minimo %}
+			{% set stock_status = 'Crítico' %}
+			{% set stock_status_class = 'warn' %}
+		{% else %}
+			{% set stock_status = 'Abastecido' %}
+			{% set stock_status_class = 'ok' %}
+		{% endif %}
+		<tr>
+			<td>{{ prod.id_producto }}</td>
+			<td>{{ prod.nombre_producto }}</td>
+			<td>{{ prod.id_area or '-' }}</td>
+			<td>{{ prod.area or '-' }}</td>
+			<td>{{ prod.subarea or '-' }}</td>
+			<td>{{ prod.unidad or '-' }}</td>
+			<td>{{ punto_minimo }}</td>
+			<td>{{ stock_actual }}</td>
+			<td>
+				<span class="status-pill {{ stock_status_class }}">{{ stock_status }}</span>
+			</td>
+			<td>
+				<span class="status-pill {{ 'ok' if (prod.estado or 'Activo') == 'Activo' else 'error' }}">
+					{{ prod.estado or 'Activo' }}
+				</span>
+			</td>
+			<td>
+				{% if can_edit %}
+				<div class="actions-row">
+					<button type="button" class="edit-row-btn" data-target="edit-row-{{ prod.id_producto|replace(' ', '_') }}">Editar</button>
+					<form method="POST" class="mini-form" onsubmit="return confirm('Eliminar producto del inventario?');">
+						<input type="hidden" name="action" value="delete_product">
+						<input type="hidden" name="id_producto" value="{{ prod.id_producto }}">
+						<button class="btn-delete" type="submit">Eliminar</button>
+					</form>
+				</div>
+				{% else %}
+				Solo lectura
+				{% endif %}
+			</td>
+		</tr>
+		{% if can_edit %}
+		<tr id="edit-row-{{ prod.id_producto|replace(' ', '_') }}" class="inventory-edit-row is-hidden">
+			<td colspan="11">
+				<form method="POST" class="edit-row-form">
+					<input type="hidden" name="action" value="upsert_product">
+					<input type="hidden" name="id_producto" value="{{ prod.id_producto }}">
+					<input type="hidden" name="id_sede" value="{{ sede.id_sede if sede else current_user.id_sede }}">
+					<div class="edit-grid">
+						<input type="text" name="nombre_producto" value="{{ prod.nombre_producto }}" placeholder="Nombre producto" required>
+						<select name="id_area" required>
+							{% for c in categorias %}
+							<option value="{{ c.nombre_categoria }}" {% if c.nombre_categoria == prod.id_area %}selected{% endif %}>{{ c.nombre_categoria }}</option>
+							{% endfor %}
+						</select>
+						<select name="area" class="area-select" data-subarea-target="edit-subarea-{{ prod.id_producto|replace(' ', '_') }}" required>
+							{% for a in areas %}
+							<option value="{{ a.nombre_area }}" {% if prod.area == a.nombre_area %}selected{% endif %}>{{ a.nombre_area|title }}</option>
+							{% endfor %}
+						</select>
+						<select id="edit-subarea-{{ prod.id_producto|replace(' ', '_') }}" name="subarea" class="subarea-select" data-current="{{ prod.subarea or '' }}"></select>
+						<select name="unidad" required>
+							{% for u in unidades %}
+							<option value="{{ u.nombre_unidad }}" {% if u.nombre_unidad == prod.unidad %}selected{% endif %}>{{ u.nombre_unidad }}</option>
+							{% endfor %}
+						</select>
+						<input type="number" step="0.01" name="punto_minimo" value="{{ inv.punto_minimo if inv else 0 }}" placeholder="Punto minimo">
+						<input type="number" step="0.01" name="stock_actual" value="{{ inv.stock_actual if inv else 0 }}" placeholder="Stock central">
+						<select name="estado">
+							<option value="Activo" {% if (prod.estado or 'Activo') == 'Activo' %}selected{% endif %}>Activo</option>
+							<option value="Inactivo" {% if prod.estado == 'Inactivo' %}selected{% endif %}>Inactivo</option>
+						</select>
+						<div class="edit-row-actions">
+							<button type="submit" class="btn-save">Guardar cambios</button>
+							<button type="button" class="btn-cancel" data-target="edit-row-{{ prod.id_producto|replace(' ', '_') }}">Cancelar</button>
+						</div>
+					</div>
+				</form>
+			</td>
+		</tr>
+		{% endif %}
+		{% else %}
+		<tr><td colspan="11">No hay registros de inventario.</td></tr>
+		{% endfor %}
+	</tbody>
+</table>
+</div>
+
+{% if can_edit %}
+<div class="inventory-create-toggle-wrap">
+	<button type="button" class="toggle-panel-btn" data-target="inventory-create-panel">Crear (+)</button>
+</div>
+
+<div id="inventory-create-panel" class="inventory-create-panel is-hidden">
+	<div class="catalog-grid">
+			<section class="catalog-card">
+				<div class="catalog-head">
+					<div>
+						<h3>Nueva area</h3>
+					</div>
+					<button type="button" class="toggle-btn" data-target="area-form">+</button>
+				</div>
+				<form id="area-form" method="POST" class="toggle-form is-hidden">
+					<input type="hidden" name="action" value="create_area">
+					<input type="text" name="nombre_area" placeholder="Ej: cocina">
+					<button type="submit">Agregar</button>
+				</form>
+			</section>
+
+		<section class="catalog-card">
+			<div class="catalog-head">
+				<div>
+					<h3>Nueva categoria</h3>
+				</div>
+				<button type="button" class="toggle-btn" data-target="category-form">+</button>
+			</div>
+			<form id="category-form" method="POST" class="toggle-form is-hidden">
+				<input type="hidden" name="action" value="create_category">
+				<input type="text" name="nombre_categoria" placeholder="Ej: Congelados">
+				<button type="submit">Agregar</button>
+			</form>
+		</section>
+
+		<section class="catalog-card">
+			<div class="catalog-head">
+				<div>
+					<h3>Nueva unidad</h3>
+				</div>
+				<button type="button" class="toggle-btn" data-target="unit-form">+</button>
+			</div>
+			<form id="unit-form" method="POST" class="toggle-form is-hidden">
+				<input type="hidden" name="action" value="create_unit">
+				<input type="text" name="nombre_unidad" placeholder="Ej: litro">
+				<button type="submit">Agregar</button>
+			</form>
+		</section>
+	</div>
+
+		<div class="catalog-grid single">
+			<section class="catalog-card wide">
+				<div class="catalog-head">
+					<div>
+						<h3>Nueva subarea</h3>
+					</div>
+					<button type="button" class="toggle-btn" data-target="subarea-form">+</button>
+				</div>
+				<form id="subarea-form" method="POST" class="toggle-form is-hidden product-form-grid">
+					<input type="hidden" name="action" value="create_subarea">
+					<select name="area_padre" required>
+						<option value="">Area padre</option>
+						{% for a in areas %}
+						<option value="{{ a.nombre_area }}">{{ a.nombre_area|title }}</option>
+						{% endfor %}
+					</select>
+					<input type="text" name="nombre_subarea" placeholder="Ej: cocina_fria">
+					<button type="submit" class="create-product-btn">Crear subarea</button>
+				</form>
+			</section>
+		</div>
+
+	<div class="catalog-grid single">
+		<section class="catalog-card wide">
+			<div class="catalog-head">
+				<div>
+					<h3>Nuevo producto</h3>
+				</div>
+				<button type="button" class="toggle-btn" data-target="product-form">+</button>
+			</div>
+			<form id="product-form" method="POST" class="toggle-form is-hidden product-form-grid">
+				<input type="hidden" name="action" value="upsert_product">
+				<div class="product-search" data-live-product-search>
+					<input type="text" name="id_producto" class="product-search-input" placeholder="Escribe ID o nombre del producto" autocomplete="off" required>
+					<div class="product-search-results is-hidden" role="listbox"></div>
+				</div>
+				<input type="text" name="nombre_producto" placeholder="Nombre producto" required>
+				<select name="id_area" required>
+					<option value="">Categoria</option>
+					{% for c in categorias %}
+					<option value="{{ c.nombre_categoria }}">{{ c.nombre_categoria }}</option>
+					{% endfor %}
+				</select>
+				<select name="area" class="area-select" data-subarea-target="create-subarea" required>
+					{% for a in areas %}
+					<option value="{{ a.nombre_area }}" {% if loop.first %}selected{% endif %}>{{ a.nombre_area|title }}</option>
+					{% endfor %}
+				</select>
+				<select id="create-subarea" name="subarea" class="subarea-select" data-current=""></select>
+				<select name="unidad" required>
+					<option value="">Unidad</option>
+					{% for u in unidades %}
+					<option value="{{ u.nombre_unidad }}">{{ u.nombre_unidad }}</option>
+					{% endfor %}
+				</select>
+				<input type="number" step="0.01" name="stock_actual" placeholder="Stock inicial (Sede Central)">
+				<input type="number" step="0.01" name="punto_minimo" placeholder="Punto minimo (alerta)">
+				<select name="estado">
+					<option value="Activo">Activo</option>
+					<option value="Inactivo">Inactivo</option>
+				</select>
+				<button type="submit" class="create-product-btn">Crear producto</button>
+			</form>
+		</section>
+	</div>
+
+	<script>
+		window.INVENTORY_PRODUCT_OPTIONS = [
+			{% for producto in productos %}
+			{
+				id: {{ producto.id_producto|tojson }},
+				name: {{ producto.nombre_producto|tojson }},
+				label: {{ (producto.id_producto ~ ' - ' ~ producto.nombre_producto)|tojson }}
+			}{% if not loop.last %},{% endif %}
+			{% endfor %}
+		];
+	</script>
+
+	<div class="catalog-grid">
+		<section class="catalog-card list-card">
+			<div class="catalog-head">
+				<div>
+					<h3>Categorias registradas</h3>
+				</div>
+				<span class="badge">Solo sin dependencias</span>
+			</div>
+			<div class="catalog-list">
+				{% for c in categorias %}
+				<div class="catalog-item">
+					<span>{{ c.nombre_categoria }}</span>
+					<div class="item-actions">
+						{% if category_counts[c.nombre_categoria] == 0 %}
+						<form method="POST">
+							<input type="hidden" name="action" value="delete_category">
+							<input type="hidden" name="nombre_categoria" value="{{ c.nombre_categoria }}">
+							<button type="submit" class="btn-danger">Eliminar</button>
+						</form>
+						{% else %}
+						<span class="muted">En uso</span>
+						{% endif %}
+					</div>
+				</div>
+				{% else %}
+				<p class="muted">No hay categorias registradas.</p>
+				{% endfor %}
+			</div>
+		</section>
+
+		<section class="catalog-card list-card">
+			<div class="catalog-head">
+				<div>
+					<h3>Unidades registradas</h3>
+				</div>
+				<span class="badge">Sin dependencias</span>
+			</div>
+			<div class="catalog-list">
+				{% for u in unidades %}
+				<div class="catalog-item">
+					<span>{{ u.nombre_unidad }}</span>
+					<div class="item-actions">
+						{% if unit_counts[u.nombre_unidad] == 0 %}
+						<form method="POST">
+							<input type="hidden" name="action" value="delete_unit">
+							<input type="hidden" name="nombre_unidad" value="{{ u.nombre_unidad }}">
+							<button type="submit" class="btn-danger">Eliminar</button>
+						</form>
+						{% else %}
+						<span class="muted">En uso</span>
+						{% endif %}
+					</div>
+				</div>
+				{% else %}
+				<p class="muted">No hay unidades registradas.</p>
+				{% endfor %}
+			</div>
+		</section>
+	</div>
+
+	<form method="POST" action="{{ url_for('inventario_import') }}" enctype="multipart/form-data" class="import-form">
+		<input type="file" name="excel_file" accept=".xlsx" required>
+		<button type="submit">Importar Excel</button>
+	</form>
+
+	<p class="muted">Para editar un producto existente, vuelve a guardar usando su mismo ID de producto.</p>
+</div>
+{% endif %}
+{% endblock %}

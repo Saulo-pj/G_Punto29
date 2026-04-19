@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Login</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;700&family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body class="login-page">
+    <div class="login-container">
+        <form method="POST" action="{{ url_for('login') }}" class="login-form">
+            <div class="login-logo">
+                <img src="{{ url_for('static', filename='img/logo.png') }}" alt="Sistema de Gestión">
+            </div>
+            <h2>Inicia Sesión</h2>
+            <p>Ingresa con tu usuario de turno</p>
+            <input type="text" name="username" placeholder="Usuario" required>
+            <div class="password-wrap">
+                <input id="login-password" type="password" name="password" placeholder="Contraseña" required>
+                <button id="toggle-password" type="button" class="password-toggle" aria-label="Mostrar contraseña" title="Mostrar contraseña">👁</button>
+            </div>
+            <button type="submit">Entrar</button>
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                        <div class="alert {{ category }}">{{ message }}</div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+        </form>
+    </div>
+    <script>
+        (function () {
+            var passwordInput = document.getElementById('login-password');
+            var toggleButton = document.getElementById('toggle-password');
+            if (!passwordInput || !toggleButton) {
+                return;
+            }
+
+            toggleButton.addEventListener('click', function () {
+                var show = passwordInput.type === 'password';
+                passwordInput.type = show ? 'text' : 'password';
+                toggleButton.textContent = show ? '🙈' : '👁';
+                toggleButton.setAttribute('aria-label', show ? 'Ocultar contraseña' : 'Mostrar contraseña');
+                toggleButton.setAttribute('title', show ? 'Ocultar contraseña' : 'Mostrar contraseña');
+            });
+        })();
+    </script>
+</body>
+</html>

@@ -1,0 +1,78 @@
+{% extends 'base.html' %}
+{% block title %}Pedidos{% endblock %}
+{% block content %}
+<h1>Pedidos</h1>
+
+<div class="pedidos-layout">
+	<section class="pedidos-list-card">
+		<h3>Listas pendientes</h3>
+		<div class="pedidos-list-scroll">
+			{% for pedido, sede, turno in pedido_rows %}
+			<a class="pedido-item {% if selected_pedido and selected_pedido.id_pedido == pedido.id_pedido %}active{% endif %}" href="{{ url_for('pedidos', pedido_id=pedido.id_pedido) }}">
+				<strong>Lista #{{ pedido.id_pedido }}</strong>
+				<span>{{ pedido.fecha.strftime('%d/%m/%Y') if pedido.fecha else '-' }} / {{ sede.nombre_sede if sede else '-' }} / {{ turno.nombre_turno if turno else '-' }}</span>
+				<em>{{ pedido.estado_general }}</em>
+			</a>
+			{% else %}
+			<p class="muted">No hay listas.</p>
+			{% endfor %}
+		</div>
+	</section>
+
+	<section class="pedidos-detail-card">
+		{% if selected_pedido %}
+		<div class="pedidos-detail-head">
+			<h3>Pedido #{{ selected_pedido.id_pedido }}</h3>
+			<span class="status-pill {% if selected_pedido.estado_general == 'Enviado' %}info{% elif selected_pedido.estado_general == 'Pendiente' %}warn{% endif %}">{{ selected_pedido.estado_general }}</span>
+		</div>
+		<p class="muted">Ajusta cantidad de envío (por defecto sale la pedida) y marca checkbox por línea.</p>
+
+		<div class="pedidos-lines">
+			{% for detalle, producto in selected_items %}
+			{% set qty_envio = detalle.cantidad_entregada if (detalle.cantidad_entregada or 0) > 0 else detalle.cantidad_pedida %}
+			{% set qty_pedida_text = '%g'|format(detalle.cantidad_pedida or 0) %}
+			{% set qty_envio_text = '%g'|format(qty_envio or 0) %}
+			{% set qty_enviada_text = '%g'|format(detalle.cantidad_entregada or 0) %}
+			<form method="POST" class="pedido-line-form pedidos-auto-form">
+				<input type="hidden" name="action" value="save_dispatch_line">
+				<input type="hidden" name="pedido_id" value="{{ selected_pedido.id_pedido }}">
+				<input type="hidden" name="id_detalle" value="{{ detalle.id_detalle }}">
+				<input type="hidden" name="scroll_y" value="0">
+				<label class="pedido-line-left">
+					<input class="pedidos-line-check" type="checkbox" name="enviar_linea" {% if (detalle.cantidad_entregada or 0) > 0 %}checked{% endif %}>
+					<span class="pedido-line-text">
+						<strong class="pedido-line-name">{{ producto.nombre_producto }}</strong>
+						<small class="pedido-line-meta">{{ producto.unidad or 'unidad' }} | pedido: {{ qty_pedida_text }}</small>
+						{% if (detalle.cantidad_entregada or 0) > 0 and detalle.estado_sede == 'Recibido' %}
+						<small class="pedido-line-status ok">Cocina confirmo recepcion: {{ qty_enviada_text }}</small>
+						{% elif (detalle.cantidad_entregada or 0) > 0 %}
+						<small class="pedido-line-status warn">Enviado a cocina: {{ qty_enviada_text }} (sin confirmar)</small>
+						{% else %}
+						<small class="pedido-line-status muted">No enviado</small>
+						{% endif %}
+					</span>
+				</label>
+				<div class="pedido-line-right">
+					<input class="pedidos-line-qty" type="number" step="0.01" min="0" name="cantidad_entregada" value="{{ qty_envio_text }}">
+				</div>
+			</form>
+			{% else %}
+			<p class="muted">Sin productos en esta lista.</p>
+			{% endfor %}
+		</div>
+
+		{% if can_update and selected_pedido.estado_general != 'Enviado' %}
+		<form method="POST" class="pedidos-send-form pedidos-auto-form">
+			<input type="hidden" name="action" value="mark_sent">
+			<input type="hidden" name="id_pedido" value="{{ selected_pedido.id_pedido }}">
+			<input type="hidden" name="scroll_y" value="0">
+			<button type="submit" class="btn-send">Confirmar envío a sede</button>
+		</form>
+		{% endif %}
+		{% else %}
+		<p class="muted">Selecciona una lista para empezar.</p>
+		{% endif %}
+	</section>
+</div>
+<script defer src="{{ url_for('static', filename='js/pedidos.js') }}"></script>
+{% endblock %}
