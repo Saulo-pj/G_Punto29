@@ -2704,6 +2704,66 @@ tbody tr:hover {
 		display: none;
 	}
 
+	.arqueo-history-table {
+		border-spacing: 0;
+		background: transparent;
+	}
+
+	.arqueo-history-table thead {
+		display: none;
+	}
+
+	.arqueo-history-table tbody {
+		display: grid;
+		gap: 10px;
+	}
+
+	.arqueo-history-table tbody > tr {
+		display: block;
+		border: 1px solid rgba(74, 74, 74, 0.2);
+		border-radius: 12px;
+		padding: 8px;
+		background: #fff;
+		box-shadow: 0 6px 14px rgba(74, 74, 74, 0.1);
+	}
+
+	.arqueo-history-table tbody > tr > td {
+		display: flex;
+		justify-content: space-between;
+		align-items: flex-start;
+		gap: 10px;
+		padding: 6px 2px;
+		white-space: normal;
+		border-bottom: 1px dashed rgba(74, 74, 74, 0.16);
+	}
+
+	.arqueo-history-table tbody > tr > td:last-child {
+		border-bottom: 0;
+	}
+
+	.arqueo-history-table tbody > tr > td::before {
+		font-weight: 700;
+		color: var(--gris-oscuro);
+		flex: 0 0 96px;
+	}
+
+	.arqueo-history-table tbody > tr > td:nth-child(1)::before { content: "ID"; }
+	.arqueo-history-table tbody > tr > td:nth-child(2)::before { content: "Sede"; }
+	.arqueo-history-table tbody > tr > td:nth-child(3)::before { content: "Turno"; }
+	.arqueo-history-table tbody > tr > td:nth-child(4)::before { content: "Base"; }
+	.arqueo-history-table tbody > tr > td:nth-child(5)::before { content: "Venta"; }
+	.arqueo-history-table tbody > tr > td:nth-child(6)::before { content: "Subtotal"; }
+	.arqueo-history-table tbody > tr > td:nth-child(7)::before { content: "Fecha"; }
+
+	.arqueo-history-table tbody > tr > td[colspan] {
+		display: block;
+		border-bottom: 0;
+	}
+
+	.arqueo-history-table tbody > tr > td[colspan]::before {
+		display: none;
+	}
+
 	.gasto-item {
 		grid-template-columns: 1fr;
 	}
