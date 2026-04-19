@@ -133,16 +133,13 @@
                 return /iPad|iPhone|iPod/.test(ua) || (window.navigator.platform === 'MacIntel' && window.navigator.maxTouchPoints > 1);
             }
 
+            if (isIOSLike()) {
+                form.classList.add('ios-date-overlay');
+            }
+
             function openPicker() {
                 if (typeof input.showPicker === 'function') {
                     input.showPicker();
-                    return;
-                }
-
-                if (isIOSLike()) {
-                    input.classList.add('ios-picker-active');
-                    input.focus();
-                    input.click();
                     return;
                 }
 
@@ -150,16 +147,10 @@
                 input.click();
             }
 
-            function closeIOSPickerProxy() {
-                input.classList.remove('ios-picker-active');
-            }
-
             button.addEventListener('click', openPicker);
             input.addEventListener('change', function () {
-                closeIOSPickerProxy();
                 form.submit();
             });
-            input.addEventListener('blur', closeIOSPickerProxy);
         })();
     </script>
     <script>
@@ -201,7 +192,7 @@
                 return;
             }
             window.addEventListener('load', function () {
-                navigator.serviceWorker.register('{{ url_for('service_worker') }}?v=20260419-1').then(function (registration) {
+                navigator.serviceWorker.register('{{ url_for('service_worker') }}?v=20260419-2').then(function (registration) {
                     registration.update();
                     if (registration.waiting) {
                         registration.waiting.postMessage({ type: 'SKIP_WAITING' });

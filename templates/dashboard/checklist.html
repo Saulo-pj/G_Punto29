@@ -141,6 +141,9 @@
 			<h3>Lista</h3>
 			<a class="btn-edit-list" href="{{ url_for('checklist', tab='edit', q=selected_q, pedido_id=selected_pedido_id if is_admin_general else None, f_turno=selected_filter_turno if is_admin_general else None, f_sede=selected_filter_sede if is_admin_general else None, f_area=selected_filter_area if is_admin_general else None, f_user=selected_filter_user or None) }}">Editar lista</a>
 		</div>
+		{% if not can_edit_selected_user %}
+		<p class="muted">Vista de solo lectura: para editar, cambia a tu usuario.</p>
+		{% endif %}
 		{% if active_checklist and estado_activo in ['Borrador', 'Pendiente'] %}
 			{% for item, producto in active_items %}
 			{% set qty_pedida_txt = '%g'|format(item.cantidad_pedida or 0) %}
@@ -204,7 +207,10 @@
 <section class="check-screen {% if active_tab == 'edit' %}active{% endif %}">
 	<div class="check-card">
 		<h3>Editar lista</h3>
-		<p class="muted">Esta es la plantilla compartida por sede/turno/area: se aplica al dia elegido y a los dias futuros.</p>
+		<p class="muted">Esta es tu plantilla personal: se aplica al dia elegido y a los dias futuros.</p>
+		{% if not can_edit_selected_user %}
+		<p class="muted">Estás viendo la plantilla de otro usuario en modo solo lectura.</p>
+		{% endif %}
 		<form method="GET" class="search-row search-autocomplete" autocomplete="off">
 			<input type="hidden" name="tab" value="edit">
 			{% if is_admin_general %}
@@ -222,6 +228,7 @@
 		<div class="edit-list-scroll">
 			{% for producto in catalog_products %}
 			<div class="quick-row" data-product-text="{{ (producto.nombre_producto ~ ' ' ~ (producto.id_producto or '') ~ ' ' ~ (producto.id_area or '') ~ ' ' ~ (producto.area or '') ~ ' ' ~ (producto.subarea or ''))|lower }}">
+				{% if can_edit_selected_user %}
 				<form method="POST" class="quick-add-form preserve-scroll-form">
 					<input type="hidden" name="id_producto" value="{{ producto.id_producto }}">
 					<input type="hidden" name="next_tab" value="edit">
@@ -246,6 +253,15 @@
 						<small class="quick-item-meta">{{ producto.unidad or 'unidad' }}{% if producto.area %} | {{ producto.area|title }}{% endif %}</small>
 					</span>
 				</form>
+				{% else %}
+				<div class="quick-add-form" aria-disabled="true">
+					<span class="{% if producto.id_producto in selected_product_ids %}btn-selected{% else %}btn-count-empty{% endif %}">{% if producto.id_producto in selected_product_ids %}ok{% else %}-{% endif %}</span>
+					<span class="quick-item-text">
+						<strong class="quick-item-name">{{ producto.nombre_producto }}</strong>
+						<small class="quick-item-meta">{{ producto.unidad or 'unidad' }}{% if producto.area %} | {{ producto.area|title }}{% endif %}</small>
+					</span>
+				</div>
+				{% endif %}
 			</div>
 			{% else %}
 			<p class="muted">Sin resultados.</p>
