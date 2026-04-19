@@ -2628,6 +2628,13 @@ tbody tr:hover {
 	/* Inventario: conservar tabla pero mejorar legibilidad tactil */
 	.inventory-table-wrap {
 		max-height: 58vh;
+		overflow: auto;
+		-webkit-overflow-scrolling: touch;
+	}
+
+	.inventory-table {
+		min-width: 980px;
+		table-layout: auto;
 	}
 
 	.gasto-item {
@@ -2659,6 +2666,30 @@ tbody tr:hover {
 	.cierre-caja-form input[type="number"],
 	.cierre-caja-form .gasto-item input[type="number"] {
 		max-width: 100%;
+	}
+
+	.cierre-caja-form .grid-2 {
+		grid-template-columns: 1fr;
+	}
+
+	.canal-control {
+		gap: 8px;
+	}
+
+	.canal-control input[type="number"] {
+		max-width: none;
+		flex: 1 1 auto;
+		min-width: 0;
+	}
+
+	.canal-icon {
+		width: 34px;
+		height: 34px;
+		flex: 0 0 34px;
+	}
+
+	.arqueo-summary-grid > div {
+		padding: 8px;
 	}
 
 	.inventory-table th,
