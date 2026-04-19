@@ -559,9 +559,10 @@ def _get_checklist_items(pedido, user=None, include_all=False, target_user_id=''
 		DetallePedido.id_pedido == pedido.id_pedido
 	)
 	if not include_all and user is not None:
+		effective_user_id = target_user_id or user.id_usuario
 		query = query.filter(
 			or_(
-				DetallePedido.id_usuario == user.id_usuario,
+				DetallePedido.id_usuario == effective_user_id,
 				DetallePedido.id_usuario.is_(None),
 			)
 		)
@@ -597,16 +598,34 @@ def _get_checklist_catalog(user, q=''):
 
 
 def _preferred_area_for_user(user):
-	if user.rol_nombre == 'cocinero':
+	return _preferred_area_for_role_name(user.rol_nombre)
+
+
+def _preferred_area_for_role_name(role_name):
+	if role_name == 'cocinero':
 		return 'cocina'
-	if user.rol_nombre == 'admin_sala':
+	if role_name == 'admin_sala':
 		return 'sala'
 	return ''
 
 
+def _checklist_scope_users(user):
+	allowed_roles = {'cocinero', 'admin_sala'}
+	preferred_area = _preferred_area_for_user(user)
+	users = Usuario.query.join(Rol, Rol.id_rol == Usuario.id_rol).filter(
+		Usuario.id_sede == user.id_sede,
+		Usuario.id_turno == user.id_turno,
+		Rol.nombre_rol.in_(allowed_roles),
+	).all()
+	if preferred_area:
+		users = [scope_user for scope_user in users if _preferred_area_for_user(scope_user) == preferred_area]
+	if not users:
+		return [user]
+	return users
+
+
 def _template_scope_query(user):
 	return PlantillaChecklistItem.query.filter_by(
-		id_usuario=user.id_usuario,
 		id_sede=user.id_sede,
 		id_turno=user.id_turno,
 		area=_preferred_area_for_user(user),
@@ -614,19 +633,36 @@ def _template_scope_query(user):
 
 
 def _get_template_product_ids(user):
-	items = _template_scope_query(user).all()
-	return {row.id_producto for row in items}
+	return {
+		id_producto
+		for (id_producto,) in _template_scope_query(user).join(
+			Producto, Producto.id_producto == PlantillaChecklistItem.id_producto
+		).filter(
+			or_(Producto.estado.is_(None), Producto.estado == '', Producto.estado == 'Activo')
+		).with_entities(PlantillaChecklistItem.id_producto).all()
+	}
 
 
-def _sync_checklist_items_with_template(checklist, template_product_ids, user_id):
+def _sync_checklist_items_with_template(checklist, template_product_ids, user_ids):
 	if not checklist or checklist.estado_general not in {'Borrador', 'Pendiente'}:
 		return
 
-	existing_items = DetallePedido.query.filter_by(id_pedido=checklist.id_pedido, id_usuario=user_id).all()
-	existing_by_product = {item.id_producto: item for item in existing_items}
+	target_user_ids = {user_id for user_id in (user_ids or []) if user_id}
+	if not target_user_ids and checklist.id_usuario:
+		target_user_ids.add(checklist.id_usuario)
+	if not target_user_ids:
+		return
 
-	for id_producto in template_product_ids:
-		if id_producto not in existing_by_product:
+	existing_items = DetallePedido.query.filter(
+		DetallePedido.id_pedido == checklist.id_pedido,
+		DetallePedido.id_usuario.in_(list(target_user_ids)),
+	).all()
+
+	existing_map = {(item.id_usuario, item.id_producto): item for item in existing_items}
+	for user_id in target_user_ids:
+		for id_producto in template_product_ids:
+			if (user_id, id_producto) in existing_map:
+				continue
 			db.session.add(
 				DetallePedido(
 					id_pedido=checklist.id_pedido,
@@ -638,8 +674,27 @@ def _sync_checklist_items_with_template(checklist, template_product_ids, user_id
 			)
 
 	for item in existing_items:
-		if item.id_producto not in template_product_ids:
-			db.session.delete(item)
+		if item.id_producto in template_product_ids:
+			continue
+		if item.estado_sede == 'Recibido' or _safe_float(item.cantidad_entregada, 0.0) > 0:
+			continue
+		db.session.delete(item)
+
+
+def _sync_open_checklists_with_template(user, selected_date):
+	template_product_ids = _get_template_product_ids(user)
+	scope_users = _checklist_scope_users(user)
+	scope_user_ids = [scope_user.id_usuario for scope_user in scope_users]
+
+	open_checklists = ChecklistPedido.query.filter(
+		ChecklistPedido.id_sede == user.id_sede,
+		ChecklistPedido.id_turno == user.id_turno,
+		db.func.date(ChecklistPedido.fecha) >= selected_date.strftime('%Y-%m-%d'),
+		ChecklistPedido.estado_general.in_(['Borrador', 'Pendiente']),
+	).order_by(ChecklistPedido.fecha.asc(), ChecklistPedido.id_pedido.asc()).all()
+
+	for checklist in open_checklists:
+		_sync_checklist_items_with_template(checklist, template_product_ids, scope_user_ids)
 
 
 def _build_checklist_from_template_if_needed(user, selected_date):
@@ -650,10 +705,12 @@ def _build_checklist_from_template_if_needed(user, selected_date):
 	template_product_ids = _get_template_product_ids(user)
 	if not template_product_ids:
 		return None
+	scope_users = _checklist_scope_users(user)
+	scope_user_ids = [scope_user.id_usuario for scope_user in scope_users]
 
 	current = _checklist_base_query(user, selected_date).order_by(ChecklistPedido.id_pedido.desc()).first()
 	if current:
-		_sync_checklist_items_with_template(current, template_product_ids, user.id_usuario)
+		_sync_checklist_items_with_template(current, template_product_ids, scope_user_ids)
 		return current
 
 	checklist = ChecklistPedido(
@@ -665,16 +722,17 @@ def _build_checklist_from_template_if_needed(user, selected_date):
 	)
 	db.session.add(checklist)
 	db.session.flush()
-	for id_producto in sorted(template_product_ids):
-		db.session.add(
-			DetallePedido(
-				id_pedido=checklist.id_pedido,
-				id_usuario=user.id_usuario,
-				id_producto=id_producto,
-				cantidad_pedida=0.0,
-				estado_sede='Pendiente',
+	for user_id in sorted(scope_user_ids):
+		for id_producto in sorted(template_product_ids):
+			db.session.add(
+				DetallePedido(
+					id_pedido=checklist.id_pedido,
+					id_usuario=user_id,
+					id_producto=id_producto,
+					cantidad_pedida=0.0,
+					estado_sede='Pendiente',
+				)
 			)
-		)
 	return checklist
 
 
@@ -961,6 +1019,8 @@ def create_app():
 				if row:
 					db.session.delete(row)
 					if InventarioSede.query.filter_by(id_producto=id_producto).count() == 1:
+						PlantillaChecklistItem.query.filter_by(id_producto=id_producto).delete(synchronize_session=False)
+						DetallePedido.query.filter_by(id_producto=id_producto).delete(synchronize_session=False)
 						producto = Producto.query.filter_by(id_producto=id_producto).first()
 						if producto:
 							db.session.delete(producto)
@@ -1638,11 +1698,20 @@ def create_app():
 		admin_sede_options = []
 		admin_area_options = []
 		admin_user_options = []
+		checklist_user_options = []
 
 		if not is_admin_general:
 			seeded_checklist = _build_checklist_from_template_if_needed(current_user, selected_date)
 			if seeded_checklist is not None:
 				db.session.commit()
+			scope_users = _checklist_scope_users(current_user)
+			checklist_user_options = [
+				{'id': scope_user.id_usuario, 'label': scope_user.username}
+				for scope_user in sorted(scope_users, key=lambda item: (item.username or '').lower())
+			]
+			allowed_user_ids = {option['id'] for option in checklist_user_options}
+			if not selected_filter_user or selected_filter_user not in allowed_user_ids:
+				selected_filter_user = current_user.id_usuario
 
 		active_checklist = None
 		visible_checklist = None
@@ -1752,7 +1821,7 @@ def create_app():
 					id_detalle=request.form.get('id_detalle', '').strip(),
 					id_pedido=active_checklist.id_pedido if active_checklist else None,
 				)
-				if is_admin_general and selected_filter_user:
+				if selected_filter_user:
 					detail_query = detail_query.filter_by(id_usuario=selected_filter_user)
 				elif not is_admin_general:
 					detail_query = detail_query.filter_by(id_usuario=current_user.id_usuario)
@@ -1795,12 +1864,10 @@ def create_app():
 								id_producto=id_producto,
 							)
 						)
-						flash('Producto agregado a tu plantilla por defecto.', 'ok')
+						flash('Producto agregado a la plantilla compartida del turno.', 'ok')
 				if not is_admin_general:
-					template_ids = _get_template_product_ids(current_user)
-					target_checklist = _build_checklist_from_template_if_needed(current_user, selected_date)
-					if target_checklist:
-						_sync_checklist_items_with_template(target_checklist, template_ids, current_user.id_usuario)
+					_build_checklist_from_template_if_needed(current_user, selected_date)
+					_sync_open_checklists_with_template(current_user, selected_date)
 
 			elif action == 'remove_selected':
 				id_producto = request.form.get('id_producto', '').strip()
@@ -1816,15 +1883,12 @@ def create_app():
 						db.session.delete(item)
 						flash('Producto quitado de la lista del usuario seleccionado.', 'ok')
 				else:
-					item = _template_scope_query(current_user).filter_by(id_producto=id_producto).first()
-					if item:
-						db.session.delete(item)
-						flash('Producto quitado de tu plantilla por defecto.', 'ok')
+					removed_count = _template_scope_query(current_user).filter_by(id_producto=id_producto).delete(synchronize_session=False)
+					if removed_count:
+						flash('Producto quitado de la plantilla compartida del turno.', 'ok')
 					if not is_admin_general:
-						template_ids = _get_template_product_ids(current_user)
-						target_checklist = _build_checklist_from_template_if_needed(current_user, selected_date)
-						if target_checklist:
-							_sync_checklist_items_with_template(target_checklist, template_ids, current_user.id_usuario)
+						_build_checklist_from_template_if_needed(current_user, selected_date)
+						_sync_open_checklists_with_template(current_user, selected_date)
 
 			elif action == 'qty_plus':
 				if not active_checklist or active_checklist.estado_general not in {'Borrador', 'Pendiente'}:
@@ -1910,7 +1974,7 @@ def create_app():
 					f_turno=request.form.get('f_turno', selected_filter_turno).strip() if is_admin_general else None,
 					f_sede=request.form.get('f_sede', selected_filter_sede).strip() if is_admin_general else None,
 					f_area=request.form.get('f_area', selected_filter_area).strip() if is_admin_general else None,
-					f_user=request.form.get('f_user', selected_filter_user).strip() if is_admin_general else None,
+					f_user=request.form.get('f_user', selected_filter_user).strip() or None,
 				)
 			)
 
@@ -1922,14 +1986,14 @@ def create_app():
 			visible_checklist,
 			include_all=is_admin_general,
 			user=current_user,
-			target_user_id=selected_filter_user if is_admin_general else '',
+			target_user_id=selected_filter_user if (is_admin_general or selected_filter_user) else '',
 			target_area=selected_filter_area if is_admin_general else '',
 		)
 		active_items = _get_checklist_items(
 			active_checklist,
 			include_all=is_admin_general,
 			user=current_user,
-			target_user_id=selected_filter_user if is_admin_general else '',
+			target_user_id=selected_filter_user if (is_admin_general or selected_filter_user) else '',
 			target_area=selected_filter_area if is_admin_general else '',
 		)
 		active_positive_items = [row for row in active_items if _safe_float(row[0].cantidad_pedida, 0.0) > 0]
@@ -1975,6 +2039,7 @@ def create_app():
 			admin_sede_options=admin_sede_options,
 			admin_area_options=admin_area_options,
 			admin_user_options=admin_user_options,
+			checklist_user_options=checklist_user_options,
 			can_insert=current_user.can_write('checklist', 'insert'),
 		)
 
