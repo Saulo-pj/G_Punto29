@@ -2632,9 +2632,76 @@ tbody tr:hover {
 		-webkit-overflow-scrolling: touch;
 	}
 
-	.inventory-table {
-		min-width: 980px;
-		table-layout: auto;
+	.inventory-table-products {
+		border-spacing: 0;
+		background: transparent;
+	}
+
+	.inventory-table-products thead {
+		display: none;
+	}
+
+	.inventory-table-products tbody {
+		display: grid;
+		gap: 10px;
+	}
+
+	.inventory-table-products tbody > tr {
+		display: block;
+		border: 1px solid rgba(74, 74, 74, 0.2);
+		border-radius: 12px;
+		padding: 8px;
+		background: #fff;
+		box-shadow: 0 6px 14px rgba(74, 74, 74, 0.1);
+	}
+
+	.inventory-table-products tbody > tr.inventory-edit-row {
+		padding: 0;
+		border: 0;
+		box-shadow: none;
+		background: transparent;
+	}
+
+	.inventory-table-products tbody > tr > td {
+		display: flex;
+		justify-content: space-between;
+		align-items: flex-start;
+		gap: 10px;
+		padding: 6px 2px;
+		white-space: normal;
+		border-bottom: 1px dashed rgba(74, 74, 74, 0.16);
+	}
+
+	.inventory-table-products tbody > tr > td:last-child {
+		border-bottom: 0;
+	}
+
+	.inventory-table-products tbody > tr > td::before {
+		font-weight: 700;
+		color: var(--gris-oscuro);
+		flex: 0 0 110px;
+	}
+
+	.inventory-table-products tbody > tr > td:nth-child(1)::before { content: "ID"; }
+	.inventory-table-products tbody > tr > td:nth-child(2)::before { content: "Producto"; }
+	.inventory-table-products tbody > tr > td:nth-child(3)::before { content: "Categoria"; }
+	.inventory-table-products tbody > tr > td:nth-child(4)::before { content: "Area"; }
+	.inventory-table-products tbody > tr > td:nth-child(5)::before { content: "Subarea"; }
+	.inventory-table-products tbody > tr > td:nth-child(6)::before { content: "Unidad"; }
+	.inventory-table-products tbody > tr > td:nth-child(7)::before { content: "Punto minimo"; }
+	.inventory-table-products tbody > tr > td:nth-child(8)::before { content: "Stock central"; }
+	.inventory-table-products tbody > tr > td:nth-child(9)::before { content: "Estado stock"; }
+	.inventory-table-products tbody > tr > td:nth-child(10)::before { content: "Estado"; }
+	.inventory-table-products tbody > tr > td:nth-child(11)::before { content: "Acciones"; }
+
+	.inventory-table-products .inventory-edit-row > td {
+		display: block;
+		padding: 0;
+		border-bottom: 0;
+	}
+
+	.inventory-table-products .inventory-edit-row > td::before {
+		display: none;
 	}
 
 	.gasto-item {

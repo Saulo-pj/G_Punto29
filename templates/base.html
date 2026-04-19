@@ -181,7 +181,7 @@
                 return;
             }
             window.addEventListener('load', function () {
-                navigator.serviceWorker.register('{{ url_for('service_worker') }}?v=20260418-2').then(function (registration) {
+                navigator.serviceWorker.register('{{ url_for('service_worker') }}?v=20260418-3').then(function (registration) {
                     registration.update();
                     if (registration.waiting) {
                         registration.waiting.postMessage({ type: 'SKIP_WAITING' });
