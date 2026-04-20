@@ -234,8 +234,8 @@
 				<input type="hidden" name="f_area" value="{{ selected_filter_area }}">
 				<input type="hidden" name="f_user" value="{{ selected_filter_user }}">
 				{% endif %}
-				<input type="file" name="template_file" accept="application/json,.json" required>
-				<button type="submit" class="btn-send">Importar plantilla</button>
+				<input type="file" name="template_file" class="template-file-input is-hidden" accept="application/json,.json" required>
+				<button type="button" class="btn-send template-import-trigger">Importar plantilla</button>
 			</form>
 		</div>
 		{% endif %}

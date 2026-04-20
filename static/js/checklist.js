@@ -465,6 +465,28 @@ function bindQuantityEdit() {
 	});
 }
 
+function bindTemplateImportTrigger() {
+	const forms = document.querySelectorAll('.template-import-form');
+	for (const form of forms) {
+		const fileInput = form.querySelector('.template-file-input');
+		const trigger = form.querySelector('.template-import-trigger');
+		if (!fileInput || !trigger) {
+			continue;
+		}
+
+		trigger.addEventListener('click', () => {
+			fileInput.click();
+		});
+
+		fileInput.addEventListener('change', () => {
+			if (!fileInput.files || fileInput.files.length === 0) {
+				return;
+			}
+			form.submit();
+		});
+	}
+}
+
 function normalizeText(text) {
 	return (text || '').toLowerCase().trim();
 }
@@ -483,6 +505,7 @@ function applyQuickFilter(input) {
 
 document.addEventListener('DOMContentLoaded', () => {
 	restoreScrollFromQuery();
+	bindTemplateImportTrigger();
 	bindScrollPersistence();
 	bindQuantityEdit();
 	setupAutocomplete();
