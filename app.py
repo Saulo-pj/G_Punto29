@@ -721,12 +721,6 @@ def _build_checklist_from_template_if_needed(user, selected_date):
 		_sync_checklist_items_with_template(current, template_product_ids, user.id_usuario)
 		return current
 
-	locked = _checklist_base_query(user, selected_date).filter(
-		ChecklistPedido.estado_general.in_(['Enviado', 'Finalizado'])
-	).first()
-	if locked:
-		return None
-
 	checklist = ChecklistPedido(
 		id_sede=user.id_sede,
 		id_turno=user.id_turno,
