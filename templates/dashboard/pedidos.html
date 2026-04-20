@@ -69,6 +69,15 @@
 			<button type="submit" class="btn-send">Confirmar envío a sede</button>
 		</form>
 		{% endif %}
+
+		{% if can_delete_requested %}
+		<form method="POST" class="pedidos-send-form" onsubmit="return confirm('Se eliminará el pedido completo (solicitado/enviado/recepcionado). ¿Continuar?');">
+			<input type="hidden" name="action" value="delete_requested_order">
+			<input type="hidden" name="id_pedido" value="{{ selected_pedido.id_pedido }}">
+			<input type="hidden" name="scroll_y" value="0">
+			<button type="submit" class="btn-danger">Eliminar pedido completo</button>
+		</form>
+		{% endif %}
 		{% else %}
 		<p class="muted">Selecciona una lista para empezar.</p>
 		{% endif %}

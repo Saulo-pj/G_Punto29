@@ -1545,6 +1545,7 @@ def create_app():
 			return _forbidden_redirect()
 		selected_date = _get_selected_app_date()
 		can_update = current_user.can_write('pedidos', 'update')
+		can_delete_requested = current_user.rol_nombre in {'admin_general', 'admin_almacen'}
 
 		pedido_id_raw = request.args.get('pedido_id', '').strip()
 		pedido_id = int(pedido_id_raw) if pedido_id_raw.isdigit() else None
@@ -1601,6 +1602,19 @@ def create_app():
 					detalle.estado_sede = 'Pendiente'
 				db.session.commit()
 				return _pedidos_post_response(request.form.get('pedido_id'))
+			elif action == 'delete_requested_order':
+				if not can_delete_requested:
+					return _forbidden_redirect()
+				pedido = ChecklistPedido.query.get(request.form.get('id_pedido'))
+				if not pedido:
+					flash('Pedido no encontrado.', 'error')
+					return _pedidos_post_response(pedido_id)
+
+				DetallePedido.query.filter_by(id_pedido=pedido.id_pedido).delete(synchronize_session=False)
+				db.session.delete(pedido)
+				db.session.commit()
+				flash('Pedido eliminado correctamente. Cocina puede volver a generar su lista.', 'ok')
+				return _pedidos_post_response(None)
 			else:
 				if not current_user.can_write('pedidos', 'insert'):
 					return _forbidden_redirect()
@@ -1682,6 +1696,7 @@ def create_app():
 			productos=Producto.query.order_by(Producto.nombre_producto).all(),
 			can_insert=current_user.can_write('pedidos', 'insert'),
 			can_update=can_update,
+			can_delete_requested=can_delete_requested,
 		)
 
 	@app.route('/checklist', methods=['GET', 'POST'])
