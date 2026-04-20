@@ -714,10 +714,18 @@ def _build_checklist_from_template_if_needed(user, selected_date):
 	if not template_product_ids:
 		return None
 
-	current = _checklist_base_query(user, selected_date).order_by(ChecklistPedido.id_pedido.desc()).first()
+	current = _checklist_base_query(user, selected_date).filter(
+		ChecklistPedido.estado_general.in_(['Borrador', 'Pendiente'])
+	).order_by(ChecklistPedido.id_pedido.desc()).first()
 	if current:
 		_sync_checklist_items_with_template(current, template_product_ids, user.id_usuario)
 		return current
+
+	locked = _checklist_base_query(user, selected_date).filter(
+		ChecklistPedido.estado_general.in_(['Enviado', 'Finalizado'])
+	).first()
+	if locked:
+		return None
 
 	checklist = ChecklistPedido(
 		id_sede=user.id_sede,
@@ -1610,8 +1618,21 @@ def create_app():
 					flash('Pedido no encontrado.', 'error')
 					return _pedidos_post_response(pedido_id)
 
+				deleted_sede_id = pedido.id_sede
+				deleted_turno_id = pedido.id_turno
 				DetallePedido.query.filter_by(id_pedido=pedido.id_pedido).delete(synchronize_session=False)
 				db.session.delete(pedido)
+
+				# Si ya no quedan pedidos cerrados para ese alcance y fecha,
+				# vuelve a crear lista editable desde las plantillas de cada usuario.
+				scope_users = Usuario.query.join(Rol, Rol.id_rol == Usuario.id_rol).filter(
+					Usuario.id_sede == deleted_sede_id,
+					Usuario.id_turno == deleted_turno_id,
+					Rol.nombre_rol.in_(['cocinero', 'admin_sala']),
+				).all()
+				for scope_user in scope_users:
+					_build_checklist_from_template_if_needed(scope_user, selected_date)
+
 				db.session.commit()
 				flash('Pedido eliminado correctamente. Cocina puede volver a generar su lista.', 'ok')
 				return _pedidos_post_response(None)
