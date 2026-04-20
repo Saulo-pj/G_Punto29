@@ -1201,6 +1201,30 @@ form button {
 	position: relative;
 }
 
+.product-auto-id-box {
+	display: grid;
+	gap: 6px;
+	padding: 10px 12px;
+	border: 1px dashed rgba(74, 74, 74, 0.22);
+	border-radius: 14px;
+	background: rgba(255, 255, 255, 0.62);
+	min-height: 58px;
+	align-content: center;
+}
+
+.product-auto-id-box label {
+	font-size: 12px;
+	font-weight: 700;
+	color: var(--gris-oscuro);
+	margin: 0;
+}
+
+.product-auto-id-value {
+	font-size: 14px;
+	font-weight: 700;
+	color: var(--negro-carbon);
+}
+
 .product-search-input {
 	margin: 0;
 	width: 100%;

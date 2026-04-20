@@ -242,9 +242,9 @@
 			</div>
 			<form id="product-form" method="POST" class="toggle-form is-hidden product-form-grid">
 				<input type="hidden" name="action" value="upsert_product">
-				<div class="product-search" data-live-product-search>
-					<input type="text" name="id_producto" class="product-search-input" placeholder="Escribe ID o nombre del producto" autocomplete="off" required>
-					<div class="product-search-results is-hidden" role="listbox"></div>
+				<div class="product-auto-id-box">
+					<label>ID</label>
+					<div class="product-auto-id-value">Se asignara automaticamente al guardar</div>
 				</div>
 				<input type="text" name="nombre_producto" placeholder="Nombre producto" required>
 				<select name="id_area" required>
@@ -275,18 +275,6 @@
 			</form>
 		</section>
 	</div>
-
-	<script>
-		window.INVENTORY_PRODUCT_OPTIONS = [
-			{% for producto in productos %}
-			{
-				id: {{ producto.id_producto|tojson }},
-				name: {{ producto.nombre_producto|tojson }},
-				label: {{ (producto.id_producto ~ ' - ' ~ producto.nombre_producto)|tojson }}
-			}{% if not loop.last %},{% endif %}
-			{% endfor %}
-		];
-	</script>
 
 	<div class="catalog-grid">
 		<section class="catalog-card list-card">

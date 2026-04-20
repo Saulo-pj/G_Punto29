@@ -1,6 +1,7 @@
 import os
 import importlib
 import json
+import re
 from io import BytesIO
 from datetime import datetime, timedelta
 from collections import defaultdict
@@ -485,6 +486,22 @@ def _safe_float(value, default=0.0):
 		return default
 
 
+def _generate_product_id():
+	existing_ids = [row[0] for row in db.session.query(Producto.id_producto).all() if row[0]]
+	max_number = 0
+	for existing_id in existing_ids:
+		match = re.match(r'^PROD(\d+)$', existing_id.strip(), re.IGNORECASE)
+		if match:
+			max_number = max(max_number, int(match.group(1)))
+
+	next_number = max_number + 1
+	while True:
+		candidate = f'PROD{next_number:04d}'
+		if candidate not in existing_ids:
+			return candidate
+		next_number += 1
+
+
 def _parse_gastos_from_form(form_data):
 	nombres = form_data.getlist('gasto_nombre[]')
 	montos = form_data.getlist('gasto_monto[]')
@@ -720,6 +737,12 @@ def _build_checklist_from_template_if_needed(user, selected_date):
 	if current:
 		_sync_checklist_items_with_template(current, template_product_ids, user.id_usuario)
 		return current
+
+	locked = _checklist_base_query(user, selected_date).filter(
+		ChecklistPedido.estado_general.in_(['Enviado', 'Finalizado'])
+	).first()
+	if locked:
+		return None
 
 	checklist = ChecklistPedido(
 		id_sede=user.id_sede,
@@ -996,8 +1019,7 @@ def create_app():
 
 			if action == 'upsert_product':
 				if not id_producto:
-					flash('ID de producto requerido.', 'error')
-					return redirect(url_for('inventario'))
+					id_producto = _generate_product_id()
 
 				producto = Producto.query.filter_by(id_producto=id_producto).first()
 				if not producto:
