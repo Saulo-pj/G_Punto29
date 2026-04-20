@@ -120,7 +120,7 @@
 				<input type="hidden" name="f_turno" value="{{ selected_filter_turno }}">
 				<input type="hidden" name="f_sede" value="{{ selected_filter_sede }}">
 				<input type="hidden" name="f_area" value="{{ selected_filter_area }}">
-				<input type="hidden" name="f_user" value="{{ selected_filter_user }}">
+				<input type="hidden" name="f_user" value="{{ selected_filter_user or current_user.id_usuario }}">
 				{% endif %}
 				<button type="submit" class="btn-send">Enviar lista</button>
 			</form>
@@ -218,10 +218,27 @@
 			<input type="hidden" name="f_turno" value="{{ selected_filter_turno }}">
 			<input type="hidden" name="f_sede" value="{{ selected_filter_sede }}">
 			<input type="hidden" name="f_area" value="{{ selected_filter_area }}">
-			<input type="hidden" name="f_user" value="{{ selected_filter_user }}">
+			<input type="hidden" name="f_user" value="{{ selected_filter_user or current_user.id_usuario }}">
 			{% endif %}
 			<input id="edit-search-input" type="text" name="q" value="{{ selected_q }}" placeholder="Busqueda rapida" autocomplete="off">
 		</form>
+		{% if can_edit_selected_user %}
+		<div class="template-tools">
+			<a class="btn-outline" href="{{ url_for('checklist_template_export', f_user=selected_filter_user or current_user.id_usuario) }}">Exportar plantilla</a>
+			<form method="POST" enctype="multipart/form-data" class="template-import-form">
+				<input type="hidden" name="action" value="import_template">
+				{% if is_admin_general %}
+				<input type="hidden" name="pedido_id" value="{{ selected_pedido_id }}">
+				<input type="hidden" name="f_turno" value="{{ selected_filter_turno }}">
+				<input type="hidden" name="f_sede" value="{{ selected_filter_sede }}">
+				<input type="hidden" name="f_area" value="{{ selected_filter_area }}">
+				<input type="hidden" name="f_user" value="{{ selected_filter_user }}">
+				{% endif %}
+				<input type="file" name="template_file" accept="application/json,.json" required>
+				<button type="submit" class="btn-send">Importar plantilla</button>
+			</form>
+		</div>
+		{% endif %}
 		{% if active_checklist and estado_activo in ['Enviado', 'Finalizado'] %}
 			<p class="muted">Esta lista ya fue enviada. Puedes editar la plantilla para los proximos dias.</p>
 		{% endif %}

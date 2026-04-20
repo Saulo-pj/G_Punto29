@@ -673,6 +673,113 @@ def _get_template_product_ids_for_user(user, target_user_id):
 	}
 
 
+def _build_template_export_payload(user, target_user_id=None):
+	target_user_id = (target_user_id or user.id_usuario or '').strip()
+	target_user = db.session.get(Usuario, target_user_id) if target_user_id else user
+	items = (
+		db.session.query(PlantillaChecklistItem, Producto)
+		.join(Producto, Producto.id_producto == PlantillaChecklistItem.id_producto)
+		.filter(
+			PlantillaChecklistItem.id_usuario == target_user_id,
+			PlantillaChecklistItem.id_sede == user.id_sede,
+			PlantillaChecklistItem.id_turno == user.id_turno,
+			PlantillaChecklistItem.area == _preferred_area_for_user(user),
+		)
+		.order_by(Producto.nombre_producto.asc())
+		.all()
+	)
+	return {
+		'meta': {
+			'tipo': 'plantilla_checklist',
+			'usuario': target_user.username if target_user else '',
+			'id_usuario': target_user_id,
+			'id_sede': user.id_sede,
+			'id_turno': user.id_turno,
+			'area': _preferred_area_for_user(user),
+			'exportado_en': datetime.utcnow().isoformat(timespec='seconds') + 'Z',
+		},
+		'productos': [
+			{
+				'id_producto': producto.id_producto,
+				'nombre_producto': producto.nombre_producto,
+				'unidad': producto.unidad or '',
+				'area': producto.area or '',
+			}
+			for _, producto in items
+		],
+	}
+
+
+def _normalize_template_import_payload(payload):
+	if isinstance(payload, dict):
+		products = payload.get('productos') or payload.get('items') or payload.get('products') or []
+	else:
+		products = payload or []
+
+	product_ids = []
+	for item in products:
+		if isinstance(item, str):
+			candidate = item.strip()
+		elif isinstance(item, dict):
+			candidate = str(item.get('id_producto') or item.get('producto_id') or item.get('id') or '').strip()
+		else:
+			candidate = ''
+		if candidate:
+			product_ids.append(candidate)
+
+	seen = set()
+	ordered_unique = []
+	for id_producto in product_ids:
+		if id_producto in seen:
+			continue
+		seen.add(id_producto)
+		ordered_unique.append(id_producto)
+	return ordered_unique
+
+
+def _replace_template_from_import(user, target_user_id, payload):
+	product_ids = _normalize_template_import_payload(payload)
+	if not product_ids:
+		return {'importados': 0, 'omitidos': 0, 'total': 0}
+
+	target_user = db.session.get(Usuario, target_user_id) if target_user_id else None
+	if not target_user:
+		target_user = user
+
+	allowed_ids = set(
+		row[0]
+		for row in db.session.query(Producto.id_producto).filter(
+			Producto.id_producto.in_(product_ids),
+			or_(Producto.estado.is_(None), Producto.estado == '', Producto.estado == 'Activo'),
+		).all()
+	)
+	PlantillaChecklistItem.query.filter_by(
+		id_usuario=target_user.id_usuario,
+		id_sede=target_user.id_sede,
+		id_turno=target_user.id_turno,
+		area=_preferred_area_for_user(target_user),
+	).delete(synchronize_session=False)
+
+	importados = 0
+	omitidos = 0
+	for id_producto in product_ids:
+		if id_producto not in allowed_ids:
+			omitidos += 1
+			continue
+		db.session.add(
+			PlantillaChecklistItem(
+				id_usuario=target_user.id_usuario,
+				id_sede=target_user.id_sede,
+				id_turno=target_user.id_turno,
+				area=_preferred_area_for_user(target_user),
+				id_producto=id_producto,
+			)
+		)
+		importados += 1
+
+	return {'importados': importados, 'omitidos': omitidos, 'total': len(product_ids)}
+
+
 def _sync_checklist_items_with_template(checklist, template_product_ids, user_id):
 	if not checklist or checklist.estado_general not in {'Borrador', 'Pendiente'}:
 		return
@@ -1756,6 +1863,7 @@ def create_app():
 		admin_area_options = []
 		admin_user_options = []
 		checklist_user_options = []
+		can_edit_selected_user = True
 
 		if not is_admin_general:
 			seeded_checklist = _build_checklist_from_template_if_needed(current_user, selected_date)
@@ -1889,6 +1997,35 @@ def create_app():
 						f_user=selected_filter_user or None,
 					)
 				)
+
+			if action == 'import_template':
+				if not can_edit_selected_user:
+					return _forbidden_redirect()
+
+				upload = request.files.get('template_file')
+				if not upload or not upload.filename:
+					flash('Debes seleccionar un archivo JSON.', 'error')
+					return redirect(url_for('checklist', tab='edit', f_user=selected_filter_user or None))
+
+				try:
+					payload = json.loads(upload.read().decode('utf-8'))
+				except Exception:
+					flash('El archivo no es un JSON valido.', 'error')
+					return redirect(url_for('checklist', tab='edit', f_user=selected_filter_user or None))
+
+				target_user = current_user
+				if is_admin_general and selected_filter_user:
+					target_user = db.session.get(Usuario, selected_filter_user) or current_user
+
+				result = _replace_template_from_import(target_user, target_user.id_usuario, payload)
+				db.session.commit()
+				_build_checklist_from_template_if_needed(target_user, selected_date)
+				_sync_open_checklists_with_template(target_user, selected_date)
+				flash(
+					f"Plantilla importada. Productos agregados: {result['importados']}. Omitidos: {result['omitidos']}",
+					'ok',
+				)
+				return redirect(url_for('checklist', tab='edit', f_user=selected_filter_user or None))
 
 			def _get_target_detail():
 				detail_query = DetallePedido.query.filter_by(
@@ -2135,6 +2272,33 @@ def create_app():
 		response.headers['Service-Worker-Allowed'] = '/'
 		response.headers['Cache-Control'] = 'no-cache'
 		return response
+
+	@app.route('/checklist/template/export')
+	@login_required
+	def checklist_template_export():
+		if not current_user.can_view('checklist'):
+			return _forbidden_redirect()
+
+		selected_user_id = request.args.get('f_user', '').strip() or current_user.id_usuario
+		if current_user.rol_nombre != 'admin_general' and selected_user_id != current_user.id_usuario:
+			selected_user_id = current_user.id_usuario
+
+		selected_user = db.session.get(Usuario, selected_user_id)
+		if not selected_user:
+			flash('Usuario no encontrado para exportar.', 'error')
+			return redirect(url_for('checklist', tab='edit'))
+
+		payload = _build_template_export_payload(selected_user, selected_user_id)
+		buffer = BytesIO(json.dumps(payload, ensure_ascii=False, indent=2).encode('utf-8'))
+		buffer.seek(0)
+		safe_name = (selected_user.username or 'plantilla').replace(' ', '_')
+		stamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+		return send_file(
+			buffer,
+			as_attachment=True,
+			download_name=f'{safe_name}_plantilla_{stamp}.json',
+			mimetype='application/json',
+		)
 
 	@app.route('/arqueo', methods=['GET', 'POST'])
 	@login_required

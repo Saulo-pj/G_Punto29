@@ -1594,6 +1594,26 @@ form button {
 	color: #666;
 }
 
+.template-tools {
+	display: grid;
+	grid-template-columns: auto 1fr;
+	gap: 10px;
+	align-items: center;
+	margin: 10px 0 12px;
+}
+
+.template-import-form {
+	display: grid;
+	grid-template-columns: 1fr auto;
+	gap: 8px;
+	align-items: center;
+}
+
+.template-import-form input[type="file"] {
+	margin: 0;
+	padding: 8px;
+}
+
 .btn-selected {
 	color: #15803d;
 	border-color: #15803d;
@@ -1859,6 +1879,8 @@ form button {
 	.actions-row,
 	.import-form,
 	.inventory-actions-top,
+	.template-tools,
+	.template-import-form,
 	.catalog-head,
 	.catalog-item,
 	.item-actions,
