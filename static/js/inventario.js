@@ -18,24 +18,9 @@ document.addEventListener('click', (event) => {
 
 const inventoryScrollKey = 'inventory.scrollY';
 const inventoryEditRowKey = 'inventory.editRowId';
-const inventoryDeleteAnchorKey = 'inventory.deleteAnchorRowId';
 
 function saveInventoryScrollPosition() {
 	window.sessionStorage.setItem(inventoryScrollKey, String(window.scrollY || window.pageYOffset || 0));
-}
-
-function findInventoryDataSibling(startNode, direction) {
-	let current = startNode;
-	while (current) {
-		current = direction === 'next' ? current.nextElementSibling : current.previousElementSibling;
-		if (!current) {
-			return null;
-		}
-		if (current.hasAttribute('data-inventory-row')) {
-			return current;
-		}
-	}
-	return null;
 }
 
 function restoreInventoryScrollPosition() {
@@ -45,18 +30,6 @@ function restoreInventoryScrollPosition() {
 		const editRow = document.getElementById(storedEditRowId);
 		if (editRow) {
 			const anchorRow = editRow.previousElementSibling || editRow;
-			window.requestAnimationFrame(() => {
-				anchorRow.scrollIntoView({ behavior: 'auto', block: 'center' });
-			});
-			return;
-		}
-	}
-
-	const storedDeleteAnchorRowId = window.sessionStorage.getItem(inventoryDeleteAnchorKey);
-	if (storedDeleteAnchorRowId) {
-		window.sessionStorage.removeItem(inventoryDeleteAnchorKey);
-		const anchorRow = document.getElementById(storedDeleteAnchorRowId);
-		if (anchorRow) {
 			window.requestAnimationFrame(() => {
 				anchorRow.scrollIntoView({ behavior: 'auto', block: 'center' });
 			});
@@ -94,19 +67,6 @@ document.addEventListener('submit', (event) => {
 		const editRow = form.closest('.inventory-edit-row');
 		if (editRow && editRow.id) {
 			window.sessionStorage.setItem(inventoryEditRowKey, editRow.id);
-		}
-	}
-
-	const actionInput = form.querySelector('input[name="action"]');
-	if (actionInput && actionInput.value === 'delete_product') {
-		const currentRow = form.closest('tr[data-inventory-row]');
-		if (currentRow) {
-			const nextRow = findInventoryDataSibling(currentRow, 'next');
-			const previousRow = findInventoryDataSibling(currentRow, 'previous');
-			const anchorRow = nextRow || previousRow;
-			if (anchorRow && anchorRow.id) {
-				window.sessionStorage.setItem(inventoryDeleteAnchorKey, anchorRow.id);
-			}
 		}
 	}
 
