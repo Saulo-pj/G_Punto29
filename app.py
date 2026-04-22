@@ -459,10 +459,10 @@ def _inventory_dashboard_metrics(user, selected_date):
 
 
 def _inventory_query_for_user(user, q='', categoria='', subarea='', unidad='', area=''):
-	query = db.session.query(Producto, InventarioSede, Sede).outerjoin(
+	query = db.session.query(Producto, InventarioSede, Sede).join(
 		InventarioSede,
 		Producto.id_producto == InventarioSede.id_producto,
-	).outerjoin(Sede, Sede.id_sede == InventarioSede.id_sede)
+	).join(Sede, Sede.id_sede == InventarioSede.id_sede)
 
 	if user.rol_nombre != 'admin_general':
 		query = query.filter(InventarioSede.id_sede == user.id_sede)

@@ -105,6 +105,7 @@
 					<form method="POST" class="mini-form" onsubmit="return confirm('Eliminar producto del inventario?');">
 						<input type="hidden" name="action" value="delete_product">
 						<input type="hidden" name="id_producto" value="{{ prod.id_producto }}">
+						<input type="hidden" name="id_sede" value="{{ sede.id_sede if sede else current_user.id_sede }}">
 						<button class="btn-delete" type="submit">Eliminar</button>
 					</form>
 				</div>
