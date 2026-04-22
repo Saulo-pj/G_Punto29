@@ -29,9 +29,9 @@ function restoreInventoryScrollPosition() {
 		window.sessionStorage.removeItem(inventoryEditRowKey);
 		const editRow = document.getElementById(storedEditRowId);
 		if (editRow) {
-			editRow.classList.remove('is-hidden');
+			const anchorRow = editRow.previousElementSibling || editRow;
 			window.requestAnimationFrame(() => {
-				editRow.scrollIntoView({ behavior: 'auto', block: 'center' });
+				anchorRow.scrollIntoView({ behavior: 'auto', block: 'center' });
 			});
 			return;
 		}
