@@ -3,7 +3,7 @@ import importlib
 import json
 import re
 from io import BytesIO
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from collections import defaultdict
 from flask import Flask, flash, redirect, render_template, request, send_file, send_from_directory, url_for, session
 from flask_login import LoginManager, current_user, login_required, login_user, logout_user
@@ -40,6 +40,8 @@ DEFAULT_AREAS = {
 	'cocina': ['cocina_caliente', 'cocina_fria', 'lavadero', 'mise_en_place'],
 	'sala': ['sala'],
 }
+
+PERU_TIMEZONE = timezone(timedelta(hours=-5), name='America/Lima')
 
 
 def _slugify(value):
@@ -80,6 +82,19 @@ def _get_operation_date(now=None):
 	if now.hour < 4:
 		return now - timedelta(days=1)
 	return now
+
+
+def _to_peru_time(value):
+	if not value:
+		return None
+	if value.tzinfo is None:
+		value = value.replace(tzinfo=timezone.utc)
+	return value.astimezone(PERU_TIMEZONE)
+
+
+def _format_peru_datetime(value, fmt='%d/%m/%Y %H:%M'):
+	peru_value = _to_peru_time(value)
+	return peru_value.strftime(fmt) if peru_value else '-'
 
 
 def _get_selected_app_date():
@@ -981,6 +996,7 @@ def create_app():
 	app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=90)
 	app.config['SESSION_COOKIE_HTTPONLY'] = True
 	app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+	app.jinja_env.filters['peru_datetime'] = _format_peru_datetime
 
 	db.init_app(app)
 	login_manager.init_app(app)
@@ -1578,18 +1594,61 @@ def create_app():
 				flash('Debes seleccionar o escribir un motivo.', 'error')
 				return redirect(url_for('movimientos'))
 
+			id_producto = request.form.get('id_producto', '').strip()
+			cantidad = _safe_float(request.form.get('cantidad'), 0.0)
+			tipo_movimiento = (request.form.get('tipo', 'ENTRADA') or 'ENTRADA').strip().upper()
+
+			if not id_producto:
+				flash('Debes seleccionar un producto valido.', 'error')
+				return redirect(url_for('movimientos'))
+			if cantidad <= 0:
+				flash('La cantidad debe ser mayor a 0.', 'error')
+				return redirect(url_for('movimientos'))
+			if tipo_movimiento not in {'ENTRADA', 'SALIDA'}:
+				flash('Tipo de movimiento invalido.', 'error')
+				return redirect(url_for('movimientos'))
+
+			producto = Producto.query.filter_by(id_producto=id_producto).first()
+			if not producto:
+				flash('El producto seleccionado no existe.', 'error')
+				return redirect(url_for('movimientos'))
+
+			inventario_row = InventarioSede.query.filter_by(
+				id_sede=current_user.id_sede,
+				id_producto=id_producto,
+			).first()
+			if not inventario_row:
+				inventario_row = InventarioSede(
+					id_sede=current_user.id_sede,
+					id_producto=id_producto,
+					stock_actual=0.0,
+					punto_minimo=0.0,
+				)
+				db.session.add(inventario_row)
+
+			stock_actual = _safe_float(inventario_row.stock_actual, 0.0)
+			if tipo_movimiento == 'SALIDA' and cantidad > stock_actual:
+				flash(f'Stock insuficiente. Disponible: {stock_actual:.2f}', 'error')
+				return redirect(url_for('movimientos'))
+
+			if tipo_movimiento == 'ENTRADA':
+				inventario_row.stock_actual = stock_actual + cantidad
+			else:
+				inventario_row.stock_actual = stock_actual - cantidad
+
 			db.session.add(
 				MovimientoInventario(
 					id_sede=current_user.id_sede,
-					id_producto=request.form.get('id_producto'),
-					cantidad=float(request.form.get('cantidad', 0)),
-					tipo=request.form.get('tipo', 'ENTRADA'),
+					id_producto=id_producto,
+					cantidad=cantidad,
+					tipo=tipo_movimiento,
 					motivo=motivo,
+					fecha=datetime.utcnow(),
 					id_usuario=current_user.id_usuario,
 				)
 			)
 			db.session.commit()
-			flash('Movimiento registrado.', 'ok')
+			flash('Movimiento registrado y stock actualizado.', 'ok')
 
 		q = request.args.get('q', '').strip()
 		fecha_desde = request.args.get('fecha_desde', '').strip()

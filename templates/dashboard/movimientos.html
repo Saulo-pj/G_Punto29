@@ -103,7 +103,7 @@
 				<td>{{ movimiento.tipo }}</td>
 				<td>{{ movimiento.motivo }}</td>
 				<td>{{ usuario.username if usuario else movimiento.id_usuario or '-' }}</td>
-				<td>{{ movimiento.fecha.strftime('%d/%m/%Y %H:%M') if movimiento.fecha else '-' }}</td>
+				<td>{{ movimiento.fecha|peru_datetime('%d/%m/%Y %H:%M') }}</td>
 			</tr>
 			{% else %}
 			<tr><td colspan="7" class="muted">Sin movimientos con esos filtros.</td></tr>
