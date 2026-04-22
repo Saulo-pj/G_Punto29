@@ -1711,12 +1711,16 @@ def create_app():
 			if row[0] not in categorias_filtro
 		]
 		categorias_filtro.extend(categorias_extra)
+		productos = Producto.query.order_by(Producto.nombre_producto).all()
+		stock_rows = InventarioSede.query.filter_by(id_sede=current_user.id_sede).all()
+		stock_por_producto = {row.id_producto: _safe_float(row.stock_actual, 0.0) for row in stock_rows}
 
 		return render_template(
 			'dashboard/movimientos.html',
 			allowed_views=_allowed_views(current_user),
 			movimientos=movs,
-			productos=Producto.query.order_by(Producto.nombre_producto).all(),
+			productos=productos,
+			stock_por_producto=stock_por_producto,
 			categorias_filtro=categorias_filtro,
 			usuarios_filtro=usuarios_filtro,
 			selected_q=q,

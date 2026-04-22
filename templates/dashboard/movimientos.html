@@ -22,6 +22,16 @@
 			</select>
 		</div>
 	</div>
+	<div class="grid-2">
+		<div>
+			<label>Stock actual (no editable)</label>
+			<input type="text" id="stock-actual-view" value="Selecciona un producto" readonly>
+		</div>
+		<div>
+			<label>Unidad (no editable)</label>
+			<input type="text" id="unidad-view" value="-" readonly>
+		</div>
+	</div>
 	<label>Cantidad</label>
 	<input type="number" step="0.01" name="cantidad" required>
 	<details class="motivo-panel" open>
@@ -119,18 +129,40 @@
 			{
 				id: {{ p.id_producto|tojson }},
 				name: {{ p.nombre_producto|tojson }},
-				label: {{ (p.id_producto ~ ' - ' ~ p.nombre_producto)|tojson }}
+				label: {{ (p.id_producto ~ ' - ' ~ p.nombre_producto)|tojson }},
+				stock: {{ (stock_por_producto.get(p.id_producto, 0.0))|tojson }},
+				unit: {{ (p.unidad or '-')|tojson }}
 			}{% if not loop.last %},{% endif %}
 			{% endfor %}
 		];
 		var productSearchInput = document.getElementById('product-search-input');
 		var productIdInput = document.getElementById('product-id-input');
 		var productResults = document.getElementById('product-search-results');
+		var stockActualView = document.getElementById('stock-actual-view');
+		var unidadView = document.getElementById('unidad-view');
 		var select = document.getElementById('motivo-select');
 		var wrap = document.getElementById('motivo-custom-wrap');
 		var custom = document.getElementById('motivo-custom');
-		if (!productSearchInput || !productIdInput || !productResults || !select || !wrap || !custom) {
+		if (!productSearchInput || !productIdInput || !productResults || !stockActualView || !unidadView || !select || !wrap || !custom) {
 			return;
+		}
+
+		function formatNumber(value) {
+			var numberValue = Number(value || 0);
+			if (Number.isNaN(numberValue)) {
+				return '0.00';
+			}
+			return numberValue.toFixed(2);
+		}
+
+		function fillProductInfo(product) {
+			if (!product) {
+				stockActualView.value = 'Selecciona un producto';
+				unidadView.value = '-';
+				return;
+			}
+			stockActualView.value = formatNumber(product.stock);
+			unidadView.value = product.unit || '-';
 		}
 
 		function clearProductValidity() {
@@ -150,6 +182,7 @@
 		function selectProduct(product) {
 			productIdInput.value = product.id;
 			productSearchInput.value = product.label;
+			fillProductInfo(product);
 			clearProductValidity();
 			hideResults();
 		}
@@ -193,6 +226,7 @@
 
 		productSearchInput.addEventListener('input', function () {
 			productIdInput.value = '';
+			fillProductInfo(null);
 			clearProductValidity();
 			renderResults(productSearchInput.value);
 		});
@@ -253,6 +287,7 @@
 
 		select.addEventListener('change', syncMotivoField);
 		syncMotivoField();
+		fillProductInfo(null);
 	})();
 </script>
 {% endblock %}
