@@ -635,8 +635,6 @@ def _get_checklist_catalog(user, q='', id_sede=None):
 	query = Producto.query.join(
 		InventarioSede,
 		InventarioSede.id_producto == Producto.id_producto,
-	).filter(
-		or_(Producto.estado.is_(None), Producto.estado == '', Producto.estado == 'Activo'),
 	).distinct()
 	if q:
 		like_q = f"%{q}%"
@@ -1755,10 +1753,13 @@ def create_app():
 			if row[0] not in categorias_filtro
 		]
 		categorias_filtro.extend(categorias_extra)
-		productos = db.session.query(Producto).join(
+		productos_query = db.session.query(Producto).join(
 			InventarioSede,
 			InventarioSede.id_producto == Producto.id_producto,
-		).distinct().order_by(Producto.nombre_producto.asc()).all()
+		)
+		if current_user.rol_nombre != 'admin_general':
+			productos_query = productos_query.filter(InventarioSede.id_sede == current_user.id_sede)
+		productos = productos_query.distinct().order_by(Producto.nombre_producto.asc()).all()
 		stock_rows = InventarioSede.query.filter_by(id_sede=current_user.id_sede).all()
 		stock_por_producto = {row.id_producto: _safe_float(row.stock_actual, 0.0) for row in stock_rows}
 
