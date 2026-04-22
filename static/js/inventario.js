@@ -16,12 +16,7 @@ document.addEventListener('click', (event) => {
 	}
 });
 
-const inventoryScrollKey = 'inventory.scrollY';
 const inventoryEditRowKey = 'inventory.editRowId';
-
-function saveInventoryScrollPosition() {
-	window.sessionStorage.setItem(inventoryScrollKey, String(window.scrollY || window.pageYOffset || 0));
-}
 
 function restoreInventoryScrollPosition() {
 	const storedEditRowId = window.sessionStorage.getItem(inventoryEditRowKey);
@@ -36,26 +31,10 @@ function restoreInventoryScrollPosition() {
 			return;
 		}
 	}
-
-	const storedScrollY = window.sessionStorage.getItem(inventoryScrollKey);
-	if (storedScrollY === null) {
-		return;
-	}
-
-	window.sessionStorage.removeItem(inventoryScrollKey);
-	const targetScrollY = Number(storedScrollY);
-	if (Number.isNaN(targetScrollY)) {
-		return;
-	}
-
-	window.requestAnimationFrame(() => {
-		window.scrollTo(0, targetScrollY);
-	});
 }
 
 window.history.scrollRestoration = 'manual';
 window.addEventListener('load', restoreInventoryScrollPosition);
-window.addEventListener('beforeunload', saveInventoryScrollPosition);
 
 document.addEventListener('submit', (event) => {
 	const form = event.target;
@@ -69,12 +48,6 @@ document.addEventListener('submit', (event) => {
 			window.sessionStorage.setItem(inventoryEditRowKey, editRow.id);
 		}
 	}
-
-	if (!form.closest('.inventory-filters') && !form.closest('.inventory-table-wrap') && !form.closest('.inventory-create-panel')) {
-		return;
-	}
-
-	saveInventoryScrollPosition();
 }, true);
 
 const areaOptions = window.INVENTORY_AREA_OPTIONS || {
