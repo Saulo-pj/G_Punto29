@@ -501,6 +501,35 @@ def _safe_float(value, default=0.0):
 		return default
 
 
+def _apply_dispatch_inventory_delta(id_sede, id_producto, delta, pedido_id, detalle_id):
+	if not id_sede or not id_producto or delta == 0:
+		return
+
+	row = InventarioSede.query.filter_by(id_sede=id_sede, id_producto=id_producto).first()
+	if not row:
+		row = InventarioSede(id_sede=id_sede, id_producto=id_producto, stock_actual=0.0, punto_minimo=0.0)
+		db.session.add(row)
+
+	stock_actual = _safe_float(row.stock_actual, 0.0)
+	stock_change = -delta
+	new_stock = stock_actual + stock_change
+	if new_stock < 0:
+		raise ValueError(f'Stock insuficiente para actualizar pedido. Disponible: {stock_actual:.2f}')
+
+	row.stock_actual = new_stock
+	db.session.add(
+		MovimientoInventario(
+			id_sede=id_sede,
+			id_producto=id_producto,
+			cantidad=abs(delta),
+			tipo='SALIDA' if delta > 0 else 'ENTRADA',
+			motivo=f'Pedido #{pedido_id} linea #{detalle_id}',
+			fecha=datetime.utcnow(),
+			id_usuario=current_user.id_usuario,
+		)
+	)
+
+
 def _generate_product_id():
 	existing_ids = [row[0] for row in db.session.query(Producto.id_producto).all() if row[0]]
 	max_number = 0
@@ -1785,13 +1814,31 @@ def create_app():
 					flash('Linea no encontrada.', 'error')
 					return _pedidos_post_response(request.form.get('pedido_id'))
 
+				pedido = ChecklistPedido.query.get(detalle.id_pedido)
 				cantidad = _safe_float(request.form.get('cantidad_entregada'), detalle.cantidad_pedida or 0.0)
 				cantidad = max(cantidad, 0.0)
 				checked = request.form.get('enviar_linea') == 'on'
 				if checked and cantidad <= 0:
 					cantidad = max(detalle.cantidad_pedida or 0.0, 1.0)
 
-				detalle.cantidad_entregada = cantidad if checked else 0.0
+				cantidad_anterior = _safe_float(detalle.cantidad_entregada, 0.0)
+				cantidad_nueva = cantidad if checked else 0.0
+				delta = cantidad_nueva - cantidad_anterior
+
+				try:
+					_apply_dispatch_inventory_delta(
+						pedido.id_sede if pedido and pedido.id_sede else current_user.id_sede,
+						detalle.id_producto,
+						delta,
+						detalle.id_pedido,
+						detalle.id_detalle,
+					)
+				except ValueError as exc:
+					db.session.rollback()
+					flash(str(exc), 'error')
+					return _pedidos_post_response(request.form.get('pedido_id'))
+
+				detalle.cantidad_entregada = cantidad_nueva
 				if detalle.estado_sede != 'Recibido':
 					detalle.estado_sede = 'Pendiente'
 				db.session.commit()
