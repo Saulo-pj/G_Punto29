@@ -17,13 +17,26 @@ document.addEventListener('click', (event) => {
 });
 
 const inventoryScrollKey = 'inventory.scrollY';
-const inventoryOpenRowKey = 'inventory.openEditRowId';
+const inventoryEditRowKey = 'inventory.editRowId';
 
 function saveInventoryScrollPosition() {
 	window.sessionStorage.setItem(inventoryScrollKey, String(window.scrollY || window.pageYOffset || 0));
 }
 
 function restoreInventoryScrollPosition() {
+	const storedEditRowId = window.sessionStorage.getItem(inventoryEditRowKey);
+	if (storedEditRowId) {
+		window.sessionStorage.removeItem(inventoryEditRowKey);
+		const editRow = document.getElementById(storedEditRowId);
+		if (editRow) {
+			editRow.classList.remove('is-hidden');
+			window.requestAnimationFrame(() => {
+				editRow.scrollIntoView({ behavior: 'auto', block: 'center' });
+			});
+			return;
+		}
+	}
+
 	const storedScrollY = window.sessionStorage.getItem(inventoryScrollKey);
 	if (storedScrollY === null) {
 		return;
@@ -40,34 +53,8 @@ function restoreInventoryScrollPosition() {
 	});
 }
 
-function saveOpenInventoryEditRow(rowId) {
-	if (!rowId) {
-		window.sessionStorage.removeItem(inventoryOpenRowKey);
-		return;
-	}
-	window.sessionStorage.setItem(inventoryOpenRowKey, rowId);
-}
-
-function restoreOpenInventoryEditRow() {
-	const rowId = window.sessionStorage.getItem(inventoryOpenRowKey);
-	if (!rowId) {
-		return;
-	}
-
-	const row = document.getElementById(rowId);
-	if (!row) {
-		window.sessionStorage.removeItem(inventoryOpenRowKey);
-		return;
-	}
-
-	row.classList.remove('is-hidden');
-}
-
 window.history.scrollRestoration = 'manual';
-window.addEventListener('load', () => {
-	restoreOpenInventoryEditRow();
-	restoreInventoryScrollPosition();
-});
+window.addEventListener('load', restoreInventoryScrollPosition);
 window.addEventListener('beforeunload', saveInventoryScrollPosition);
 
 document.addEventListener('submit', (event) => {
@@ -76,39 +63,19 @@ document.addEventListener('submit', (event) => {
 		return;
 	}
 
+	if (form.classList.contains('edit-row-form')) {
+		const editRow = form.closest('.inventory-edit-row');
+		if (editRow && editRow.id) {
+			window.sessionStorage.setItem(inventoryEditRowKey, editRow.id);
+		}
+	}
+
 	if (!form.closest('.inventory-filters') && !form.closest('.inventory-table-wrap') && !form.closest('.inventory-create-panel')) {
 		return;
 	}
 
-	if (form.classList.contains('edit-row-form')) {
-		const editRow = form.closest('.inventory-edit-row');
-		saveOpenInventoryEditRow(editRow ? editRow.id : '');
-	} else {
-		saveOpenInventoryEditRow('');
-	}
-
 	saveInventoryScrollPosition();
 }, true);
-
-document.addEventListener('click', (event) => {
-	const button = event.target.closest('[data-target]');
-	if (!button) {
-		return;
-	}
-
-	const targetId = button.getAttribute('data-target');
-	if (!targetId || !targetId.startsWith('edit-row-')) {
-		return;
-	}
-
-	const targetRow = document.getElementById(targetId);
-	if (!targetRow) {
-		return;
-	}
-
-	const isOpen = !targetRow.classList.contains('is-hidden');
-	saveOpenInventoryEditRow(isOpen ? targetId : '');
-});
 
 const areaOptions = window.INVENTORY_AREA_OPTIONS || {
 	cocina: ['cocina_caliente', 'cocina_fria', 'lavadero', 'mise_en_place'],
