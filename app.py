@@ -501,6 +501,21 @@ def _safe_float(value, default=0.0):
 		return default
 
 
+def _resolve_target_sede(user, form_value=''):
+	if user.rol_nombre != 'admin_general':
+		return user.id_sede
+
+	form_value = (form_value or '').strip()
+	if form_value.isdigit():
+		return int(form_value)
+
+	if user.id_sede:
+		return user.id_sede
+
+	first_sede = Sede.query.order_by(Sede.id_sede.asc()).first()
+	return first_sede.id_sede if first_sede else None
+
+
 def _generate_product_id():
 	existing_ids = [row[0] for row in db.session.query(Producto.id_producto).all() if row[0]]
 	max_number = 0
@@ -1138,7 +1153,10 @@ def create_app():
 
 			action = request.form.get('action', 'update_row')
 			id_producto = request.form.get('id_producto', '').strip()
-			target_sede = current_user.id_sede if current_user.rol_nombre != 'admin_general' else int(request.form.get('id_sede', current_user.id_sede))
+			target_sede = _resolve_target_sede(current_user, request.form.get('id_sede', ''))
+			if target_sede is None:
+				flash('No se pudo determinar la sede destino del inventario.', 'error')
+				return redirect(url_for('inventario'))
 
 			if action == 'upsert_product':
 				if not id_producto:
