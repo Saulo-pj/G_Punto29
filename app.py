@@ -464,9 +464,6 @@ def _inventory_query_for_user(user, q='', categoria='', subarea='', unidad='', a
 		Producto.id_producto == InventarioSede.id_producto,
 	).join(Sede, Sede.id_sede == InventarioSede.id_sede)
 
-	if user.rol_nombre != 'admin_general':
-		query = query.filter(InventarioSede.id_sede == user.id_sede)
-
 	if q:
 		like_q = f"%{q}%"
 		query = query.filter(
@@ -635,12 +632,10 @@ def _get_checklist_items(pedido, user=None, include_all=False, target_user_id=''
 
 
 def _get_checklist_catalog(user, q='', id_sede=None):
-	target_sede = id_sede or user.id_sede
 	query = Producto.query.join(
 		InventarioSede,
 		InventarioSede.id_producto == Producto.id_producto,
 	).filter(
-		InventarioSede.id_sede == target_sede,
 		or_(Producto.estado.is_(None), Producto.estado == '', Producto.estado == 'Activo'),
 	).distinct()
 	if q:
@@ -1763,8 +1758,6 @@ def create_app():
 		productos = db.session.query(Producto).join(
 			InventarioSede,
 			InventarioSede.id_producto == Producto.id_producto,
-		).filter(
-			InventarioSede.id_sede == current_user.id_sede,
 		).distinct().order_by(Producto.nombre_producto.asc()).all()
 		stock_rows = InventarioSede.query.filter_by(id_sede=current_user.id_sede).all()
 		stock_por_producto = {row.id_producto: _safe_float(row.stock_actual, 0.0) for row in stock_rows}
