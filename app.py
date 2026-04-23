@@ -1110,6 +1110,50 @@ def create_app():
 			metrics=metrics,
 		)
 
+	@app.route('/inventario/dashboard/export')
+	@login_required
+	def inventario_dashboard_export():
+		if not current_user.can_view('inventario'):
+			return _forbidden_redirect()
+
+		selected_date = _get_selected_app_date()
+		metrics = _inventory_dashboard_metrics(current_user, selected_date)
+		openpyxl = importlib.import_module('openpyxl')
+		wb = openpyxl.Workbook()
+
+		ws_low = wb.active
+		ws_low.title = 'Por acabarse'
+		ws_low.append(['ID', 'Producto', 'Stock', 'Minimo', 'Sede'])
+		for producto, inv, sede in metrics.get('por_acabarse', []):
+			ws_low.append([
+				producto.id_producto,
+				producto.nombre_producto,
+				inv.stock_actual if inv else 0,
+				inv.punto_minimo if inv else 0,
+				sede.nombre_sede if sede else '',
+			])
+
+		ws_zero = wb.create_sheet('Acabados')
+		ws_zero.append(['ID', 'Producto', 'Stock', 'Sede'])
+		for producto, inv, sede in metrics.get('acabados', []):
+			ws_zero.append([
+				producto.id_producto,
+				producto.nombre_producto,
+				inv.stock_actual if inv else 0,
+				sede.nombre_sede if sede else '',
+			])
+
+		output = BytesIO()
+		wb.save(output)
+		output.seek(0)
+		stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+		return send_file(
+			output,
+			as_attachment=True,
+			download_name=f'inventario_alertas_{stamp}.xlsx',
+			mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+		)
+
 	@app.route('/perfil', methods=['GET', 'POST'])
 	@login_required
 	def perfil():

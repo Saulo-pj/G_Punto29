@@ -313,6 +313,12 @@ body {
 	max-height: 340px;
 }
 
+.inventory-dashboard-actions {
+	display: flex;
+	justify-content: flex-end;
+	margin: 12px 0 6px;
+}
+
 .profile-form {
 	display: grid;
 	gap: 10px;
