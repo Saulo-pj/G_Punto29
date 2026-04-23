@@ -2,9 +2,12 @@
 {% block title %}Arqueo Caja{% endblock %}
 {% block content %}
 <h1>Cierre de caja</h1>
-<div class="inventory-actions-top">
+<div class="inventory-actions-top arqueo-actions">
 	<a class="btn-outline" href="{{ url_for('arqueo_dashboard') }}">Ver dashboard de arqueo</a>
+	<button type="button" id="arqueo-export-btn" class="btn-outline">Descargar imagen</button>
 </div>
+
+<div id="arqueo-capture">
 
 {% if is_admin_general %}
 <form method="GET" class="inline-form">
@@ -154,6 +157,9 @@
 	</table>
 </div>
 
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 <script>
 	(function () {
 		var list = document.getElementById('gastos-list');
@@ -163,8 +169,42 @@
 		var subtotalEl = document.getElementById('sum-subtotal');
 		var totalOperativoEl = document.getElementById('sum-total-operativo');
 		var diferenciaPill = document.getElementById('sum-diferencia-pill');
+		var exportBtn = document.getElementById('arqueo-export-btn');
+		var captureTarget = document.getElementById('arqueo-capture');
 		if (!list || !addBtn) {
 			return;
+		}
+
+		function buildExportName() {
+			var now = new Date();
+			var yyyy = String(now.getFullYear());
+			var mm = String(now.getMonth() + 1).padStart(2, '0');
+			var dd = String(now.getDate()).padStart(2, '0');
+			return 'arqueo_' + yyyy + mm + dd + '.png';
+		}
+
+		function exportArqueoImage() {
+			if (!exportBtn || !captureTarget || typeof html2canvas !== 'function') {
+				return;
+			}
+			exportBtn.disabled = true;
+			exportBtn.textContent = 'Generando...';
+			html2canvas(captureTarget, {
+				backgroundColor: '#f4f4f4',
+				scale: 2,
+			}).then(function (canvas) {
+				var link = document.createElement('a');
+				link.download = buildExportName();
+				link.href = canvas.toDataURL('image/png');
+				link.click();
+			}).finally(function () {
+				exportBtn.disabled = false;
+				exportBtn.textContent = 'Descargar imagen';
+			});
+		}
+
+		if (exportBtn) {
+			exportBtn.addEventListener('click', exportArqueoImage);
 		}
 
 		function toNum(value) {
