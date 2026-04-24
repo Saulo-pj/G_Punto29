@@ -1232,11 +1232,29 @@ def create_app():
 
 				row = InventarioSede.query.filter_by(id_sede=target_sede, id_producto=id_producto).first()
 				if not row:
-					row = InventarioSede(id_sede=target_sede, id_producto=id_producto)
+					row = InventarioSede(id_sede=target_sede, id_producto=id_producto, stock_actual=0.0, punto_minimo=0.0)
 					db.session.add(row)
 
-				row.stock_actual = _safe_float(request.form.get('stock_actual'), row.stock_actual or 0.0)
+				# Registrar movimiento si hay cambio de stock
+				prev_stock = float(row.stock_actual or 0.0)
+				new_stock = _safe_float(request.form.get('stock_actual'), prev_stock)
+				row.stock_actual = new_stock
 				row.punto_minimo = _safe_float(request.form.get('punto_minimo'), row.punto_minimo or 0.0)
+				stock_delta = new_stock - prev_stock
+				if abs(stock_delta) > 0.0001:
+					tipo = 'ENTRADA' if stock_delta > 0 else 'SALIDA'
+					motivo = 'Ajuste inventario (edicion producto)'
+					db.session.add(
+						MovimientoInventario(
+							id_sede=target_sede,
+							id_producto=id_producto,
+							cantidad=abs(stock_delta),
+							tipo=tipo,
+							motivo=motivo,
+							fecha=datetime.utcnow(),
+							id_usuario=current_user.id_usuario,
+						)
+					)
 				db.session.commit()
 				flash('Producto guardado en inventario.', 'ok')
 
@@ -1316,40 +1334,31 @@ def create_app():
 				else:
 					flash('El area ya existe o esta vacia.', 'error')
 
-			elif action == 'create_subarea':
-				nombre_area = request.form.get('area_padre', '').strip()
-				nombre_subarea = request.form.get('nombre_subarea', '').strip()
-				area_obj = Area.query.filter(db.func.lower(Area.nombre_area) == nombre_area.lower()).first()
-				if not area_obj:
-					flash('Debes crear el area primero.', 'error')
-				elif nombre_subarea and not Subarea.query.filter_by(id_area=area_obj.id_area, nombre_subarea=_slugify(nombre_subarea)).first():
-					db.session.add(Subarea(id_area=area_obj.id_area, nombre_subarea=_slugify(nombre_subarea)))
-					db.session.commit()
-					flash('Subarea creada.', 'ok')
-				else:
-					flash('La subarea ya existe o esta vacia.', 'error')
-
-			elif action == 'delete_unit':
-				nombre_unidad = request.form.get('nombre_unidad', '').strip()
-				if nombre_unidad and not Producto.query.filter(Producto.unidad == nombre_unidad).first():
-					unidad = Unidad.query.filter_by(nombre_unidad=nombre_unidad).first()
-					if unidad:
-						db.session.delete(unidad)
+			elif action == 'delete_product':
+				# Borrado en cascada: eliminar todo inventario y movimientos del producto a nivel global
+				any_row = InventarioSede.query.filter_by(id_sede=target_sede, id_producto=id_producto).first()
+				if any_row:
+					# eliminar movimientos históricos del producto
+					MovimientoInventario.query.filter_by(id_producto=id_producto).delete(synchronize_session=False)
+					# eliminar todas las filas de inventario para este producto en todas las sedes
+					InventarioSede.query.filter_by(id_producto=id_producto).delete(synchronize_session=False)
+					# eliminar referencias en plantillas
+					PlantillaChecklistItem.query.filter_by(id_producto=id_producto).delete(synchronize_session=False)
+					# eliminar detalles de pedidos asociados
+					DetallePedido.query.filter_by(id_producto=id_producto).delete(synchronize_session=False)
+					# eliminar producto
+					producto = Producto.query.filter_by(id_producto=id_producto).first()
+					if producto:
+						db.session.delete(producto)
+					try:
 						db.session.commit()
-						flash('Unidad eliminada.', 'ok')
+					except IntegrityError as exc:
+						db.session.rollback()
+						flash(f'Error al eliminar producto: {exc}', 'error')
+					else:
+						flash('Producto y sus registros relacionados fueron eliminados.', 'ok')
 				else:
-					flash('No se puede eliminar una unidad en uso.', 'error')
-
-			else:
-				row = InventarioSede.query.filter_by(
-					id_sede=target_sede,
-					id_producto=id_producto,
-				).first()
-				if row:
-					row.stock_actual = _safe_float(request.form.get('stock_actual'), row.stock_actual)
-					row.punto_minimo = _safe_float(request.form.get('punto_minimo'), row.punto_minimo)
-					db.session.commit()
-					flash('Inventario actualizado.', 'ok')
+					flash('No se encontro el producto en esa sede.', 'error')
 
 		q = request.args.get('q', '').strip()
 		categoria = request.args.get('categoria', '').strip()
