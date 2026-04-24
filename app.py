@@ -1244,6 +1244,8 @@ def create_app():
 				row = InventarioSede.query.filter_by(id_sede=target_sede, id_producto=id_producto).first()
 				if row:
 					db.session.delete(row)
+					# Asegurarse que la eliminación pendiente se flushee antes de verificar filas restantes
+					db.session.flush()
 					PlantillaChecklistItem.query.filter_by(id_sede=target_sede, id_producto=id_producto).delete(synchronize_session=False)
 					open_pedido_ids = [
 						pedido_id
@@ -1259,7 +1261,8 @@ def create_app():
 						).delete(synchronize_session=False)
 					# Eliminar movimientos asociados antes de borrar el producto para evitar errores de FK
 					MovimientoInventario.query.filter_by(id_producto=id_producto).delete(synchronize_session=False)
-					if InventarioSede.query.filter_by(id_producto=id_producto).count() == 1:
+					# Si no quedan registros de inventario para este producto, entonces eliminar el producto
+					if InventarioSede.query.filter_by(id_producto=id_producto).count() == 0:
 						PlantillaChecklistItem.query.filter_by(id_producto=id_producto).delete(synchronize_session=False)
 						DetallePedido.query.filter_by(id_producto=id_producto).delete(synchronize_session=False)
 						producto = Producto.query.filter_by(id_producto=id_producto).first()

@@ -147,6 +147,10 @@ class InventarioSede(db.Model):
 	stock_actual = db.Column(db.Float, default=0.0)
 	punto_minimo = db.Column(db.Float, default=0.0)
 
+	__table_args__ = (
+		UniqueConstraint('id_sede', 'id_producto', name='uq_inventario_sede_producto'),
+	)
+
 
 # --- OPERACIONES (Checklist, Pedidos, Movimientos, Caja) ---
 
