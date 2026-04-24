@@ -10,6 +10,7 @@ from flask_login import LoginManager, current_user, login_required, login_user, 
 from dotenv import load_dotenv
 from sqlalchemy import or_
 from sqlalchemy import inspect, text
+from sqlalchemy.exc import IntegrityError
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from database import (
@@ -1256,14 +1257,21 @@ def create_app():
 							DetallePedido.id_pedido.in_(open_pedido_ids),
 							DetallePedido.id_producto == id_producto,
 						).delete(synchronize_session=False)
+					# Eliminar movimientos asociados antes de borrar el producto para evitar errores de FK
+					MovimientoInventario.query.filter_by(id_producto=id_producto).delete(synchronize_session=False)
 					if InventarioSede.query.filter_by(id_producto=id_producto).count() == 1:
 						PlantillaChecklistItem.query.filter_by(id_producto=id_producto).delete(synchronize_session=False)
 						DetallePedido.query.filter_by(id_producto=id_producto).delete(synchronize_session=False)
 						producto = Producto.query.filter_by(id_producto=id_producto).first()
 						if producto:
 							db.session.delete(producto)
-					db.session.commit()
-					flash('Producto eliminado del inventario.', 'ok')
+					try:
+						db.session.commit()
+					except IntegrityError as exc:
+						db.session.rollback()
+						flash(f'Error al eliminar producto: {exc}', 'error')
+					else:
+						flash('Producto eliminado del inventario.', 'ok')
 				else:
 					flash('No se encontro el producto en esa sede.', 'error')
 
