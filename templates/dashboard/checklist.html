@@ -64,7 +64,12 @@
 				<a class="btn-go-list" href="{{ url_for('checklist', tab='list', pedido_id=selected_pedido_id if is_admin_general else None, f_turno=selected_filter_turno if is_admin_general else None, f_sede=selected_filter_sede if is_admin_general else None, f_area=selected_filter_area if is_admin_general else None, f_user=selected_filter_user or None) }}">Lista (+)</a>
 			</div>
 			<div class="check-list-view">
+				{% set _ns = namespace(prev_area=None) %}
 				{% for item, producto in visible_positive_items %}
+					{% if producto.area != _ns.prev_area %}
+						<div class="category-subtitle">{{ (producto.area or 'Sin categoría')|title }}</div>
+						{% set _ns.prev_area = producto.area %}
+					{% endif %}
 					{% set qty_enviada = item.cantidad_entregada or 0 %}
 					{% set qty_pedida_txt = '%g'|format(item.cantidad_pedida or 0) %}
 					{% set qty_enviada_txt = '%g'|format(qty_enviada or 0) %}
@@ -145,9 +150,14 @@
 		<p class="muted">Vista de solo lectura: para editar, cambia a tu usuario.</p>
 		{% endif %}
 		{% if active_checklist and estado_activo in ['Borrador', 'Pendiente'] %}
+			{% set _ns = namespace(prev_area=None) %}
 			{% for item, producto in active_items %}
-			{% set qty_pedida_txt = '%g'|format(item.cantidad_pedida or 0) %}
-			<div class="line-edit">
+				{% if producto.area != _ns.prev_area %}
+					<div class="category-subtitle">{{ (producto.area or 'Sin categoría')|title }}</div>
+					{% set _ns.prev_area = producto.area %}
+				{% endif %}
+				{% set qty_pedida_txt = '%g'|format(item.cantidad_pedida or 0) %}
+				<div class="line-edit">
 				<form method="POST" class="qty-counter-form preserve-scroll-form">
 					<input type="hidden" name="id_detalle" value="{{ item.id_detalle }}">
 					<input type="hidden" name="next_tab" value="list">
@@ -243,8 +253,13 @@
 			<p class="muted">Esta lista ya fue enviada. Puedes editar la plantilla para los proximos dias.</p>
 		{% endif %}
 		<div class="edit-list-scroll">
+			{% set _ns = namespace(prev_area=None) %}
 			{% for producto in catalog_products %}
-			<div class="quick-row" data-product-text="{{ (producto.nombre_producto ~ ' ' ~ (producto.id_producto or '') ~ ' ' ~ (producto.id_area or '') ~ ' ' ~ (producto.area or '') ~ ' ' ~ (producto.subarea or ''))|lower }}">
+				{% if producto.area != _ns.prev_area %}
+					<div class="category-subtitle">{{ (producto.area or 'Sin categoría')|title }}</div>
+					{% set _ns.prev_area = producto.area %}
+				{% endif %}
+				<div class="quick-row" data-product-text="{{ (producto.nombre_producto ~ ' ' ~ (producto.id_producto or '') ~ ' ' ~ (producto.id_area or '') ~ ' ' ~ (producto.area or '') ~ ' ' ~ (producto.subarea or ''))|lower }}">
 				{% if can_edit_selected_user %}
 				<form method="POST" class="quick-add-form preserve-scroll-form">
 					<input type="hidden" name="id_producto" value="{{ producto.id_producto }}">
