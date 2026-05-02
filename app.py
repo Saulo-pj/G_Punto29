@@ -633,10 +633,19 @@ def _get_checklist_items(pedido, user=None, include_all=False, target_user_id=''
 
 
 def _get_checklist_catalog(user, q='', id_sede=None):
-	query = Producto.query.join(
-		InventarioSede,
-		InventarioSede.id_producto == Producto.id_producto,
-	).distinct()
+	# Usar solo el inventario central (Almacen) como fuente única de productos para
+	# el catálogo del checklist, evitando duplicados cuando hay inventarios por sede.
+	almacen = Sede.query.filter(db.func.lower(Sede.nombre_sede) == 'almacen').first()
+	if almacen:
+		# Obtener los id_producto presentes en el inventario del almacen
+		prod_ids = [r for (r,) in InventarioSede.query.with_entities(InventarioSede.id_producto).filter_by(id_sede=almacen.id_sede).all()]
+		query = Producto.query.filter(Producto.id_producto.in_(prod_ids))
+	else:
+		# Fallback: unir a InventarioSede sin filtrar por sede (antiguo comportamiento)
+		query = Producto.query.join(
+			InventarioSede,
+			InventarioSede.id_producto == Producto.id_producto,
+		).distinct()
 	if q:
 		like_q = f"%{q}%"
 		query = query.filter(
