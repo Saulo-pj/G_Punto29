@@ -651,6 +651,31 @@ def _get_checklist_catalog(user, q='', id_sede=None):
 
 	preferred_area = _preferred_area_for_user(user)
 	productos = query.all()
+
+	# Resolver nombre de categoría legible para cada producto y adjuntarlo como
+	# atributo `categoria_display` para uso en plantillas. Producto.id_area puede
+	# contener nombre de categoría o un identificador; intentamos coincidir con
+	# la tabla Categoria por nombre o por id (cuando sea numérico).
+	all_categorias = {c.nombre_categoria: c.nombre_categoria for c in Categoria.query.all()}
+	for p in productos:
+		cat_display = ''
+		if p.id_area:
+			# intento directo por nombre (case-insensitive)
+			found = next((c for c in all_categorias.keys() if c.lower() == (p.id_area or '').lower()), None)
+			if found:
+				cat_display = all_categorias[found]
+			else:
+				# si id_area tiene formato numérico, buscar por id_categoria
+				try:
+					cid = int(p.id_area)
+					categoria_obj = Categoria.query.get(cid)
+					if categoria_obj:
+						cat_display = categoria_obj.nombre_categoria
+				except Exception:
+					pass
+		if not cat_display:
+			cat_display = p.id_area or ''
+		setattr(p, 'categoria_display', cat_display)
 	if not preferred_area:
 		return sorted(productos, key=lambda p: (p.nombre_producto or '').lower())
 	return sorted(

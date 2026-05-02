@@ -66,9 +66,9 @@
 			<div class="check-list-view">
 				{% set _ns = namespace(prev_area=None) %}
 				{% for item, producto in visible_positive_items %}
-					{% if producto.id_area != _ns.prev_area %}
-						<div class="category-subtitle">{{ (producto.id_area or 'Sin categoría')|title }}</div>
-						{% set _ns.prev_area = producto.id_area %}
+					{% if producto.categoria_display != _ns.prev_area %}
+						<div class="category-subtitle">{{ (producto.categoria_display or 'Sin categoría')|title }}</div>
+						{% set _ns.prev_area = producto.categoria_display %}
 					{% endif %}
 					{% set qty_enviada = item.cantidad_entregada or 0 %}
 					{% set qty_pedida_txt = '%g'|format(item.cantidad_pedida or 0) %}
@@ -152,9 +152,9 @@
 		{% if active_checklist and estado_activo in ['Borrador', 'Pendiente'] %}
 			{% set _ns = namespace(prev_area=None) %}
 			{% for item, producto in active_items %}
-				{% if producto.id_area != _ns.prev_area %}
-					<div class="category-subtitle">{{ (producto.id_area or 'Sin categoría')|title }}</div>
-					{% set _ns.prev_area = producto.id_area %}
+					{% if producto.categoria_display != _ns.prev_area %}
+					<div class="category-subtitle">{{ (producto.categoria_display or 'Sin categoría')|title }}</div>
+					{% set _ns.prev_area = producto.categoria_display %}
 				{% endif %}
 				{% set qty_pedida_txt = '%g'|format(item.cantidad_pedida or 0) %}
 				<div class="line-edit">
@@ -255,9 +255,9 @@
 		<div class="edit-list-scroll">
 			{% set _ns = namespace(prev_area=None) %}
 			{% for producto in catalog_products %}
-				{% if producto.id_area != _ns.prev_area %}
-					<div class="category-subtitle">{{ (producto.id_area or 'Sin categoría')|title }}</div>
-					{% set _ns.prev_area = producto.id_area %}
+				{% if producto.categoria_display != _ns.prev_area %}
+					<div class="category-subtitle">{{ (producto.categoria_display or 'Sin categoría')|title }}</div>
+					{% set _ns.prev_area = producto.categoria_display %}
 				{% endif %}
 				<div class="quick-row" data-product-text="{{ (producto.nombre_producto ~ ' ' ~ (producto.id_producto or '') ~ ' ' ~ (producto.id_area or '') ~ ' ' ~ (producto.area or '') ~ ' ' ~ (producto.subarea or ''))|lower }}">
 				{% if can_edit_selected_user %}
