@@ -629,7 +629,32 @@ def _get_checklist_items(pedido, user=None, include_all=False, target_user_id=''
 		query = query.filter(DetallePedido.id_usuario == target_user_id)
 	if include_all and target_area:
 		query = query.filter(db.func.lower(Producto.area) == target_area.lower())
-	return query.order_by(Producto.nombre_producto.asc()).all()
+	rows = query.order_by(Producto.nombre_producto.asc()).all()
+
+	# Adjuntar nombre legible de categoria (`categoria_display`) a cada Producto
+	# usando la misma lógica que en _get_checklist_catalog para asegurar
+	# consistencia entre catálogo e items del checklist.
+	if rows:
+		all_categorias = {c.nombre_categoria: c.nombre_categoria for c in Categoria.query.all()}
+		for detalle, producto in rows:
+			cat_display = ''
+			if producto and getattr(producto, 'id_area', None):
+				found = next((c for c in all_categorias.keys() if c.lower() == (producto.id_area or '').lower()), None)
+				if found:
+					cat_display = all_categorias[found]
+				else:
+					try:
+						cid = int(producto.id_area)
+						categoria_obj = Categoria.query.get(cid)
+						if categoria_obj:
+							cat_display = categoria_obj.nombre_categoria
+					except Exception:
+						pass
+			if not cat_display:
+				cat_display = producto.id_area or '' if producto else ''
+			if producto:
+				setattr(producto, 'categoria_display', cat_display)
+	return rows
 
 
 def _get_checklist_catalog(user, q='', id_sede=None):
