@@ -629,13 +629,10 @@ def _get_checklist_items(pedido, user=None, include_all=False, target_user_id=''
 		query = query.filter(DetallePedido.id_usuario == target_user_id)
 	if include_all and target_area:
 		query = query.filter(db.func.lower(Producto.area) == target_area.lower())
-	# Asegurar que los items solo vengan del inventario central (Almacen).
-	almacen = Sede.query.filter(db.func.lower(Sede.nombre_sede) == 'almacen').first()
-	if almacen:
-		almacen_prod_ids = [r for (r,) in InventarioSede.query.with_entities(InventarioSede.id_producto).filter_by(id_sede=almacen.id_sede).all()]
-		if almacen_prod_ids:
-			query = query.filter(Producto.id_producto.in_(almacen_prod_ids))
-
+	# No filtrar los items del pedido por inventario central: los items ya
+	# existentes en `DetallePedido` deben seguir mostrándose en "Lista" y
+	# "Editar lista" aunque el inventario central cambie. Solo el catálogo
+	# (fuente para agregar items) se obtiene desde el inventario central.
 	rows = query.order_by(Producto.nombre_producto.asc()).all()
 
 	# Adjuntar nombre legible de categoria (`categoria_display`) a cada Producto
