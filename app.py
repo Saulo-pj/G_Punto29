@@ -721,11 +721,17 @@ def _get_checklist_catalog(user, q='', id_sede=None):
 		if not cat_display:
 			cat_display = p.id_area or ''
 		setattr(p, 'categoria_display', cat_display)
+	# Ordenar por categoria legible y luego por nombre de producto para que en la
+	# interfaz las categorias aparezcan agrupadas.
+	def _sort_key(p):
+		return ((p.categoria_display or '').lower(), (p.nombre_producto or '').lower())
+
 	if not preferred_area:
-		return sorted(productos, key=lambda p: (p.nombre_producto or '').lower())
+		return sorted(productos, key=_sort_key)
+	# Si hay preferencia de area, mantenerla como prioridad secundaria
 	return sorted(
 		productos,
-		key=lambda p: (0 if (p.area or '').lower() == preferred_area else 1, (p.nombre_producto or '').lower()),
+		key=lambda p: (0 if (p.area or '').lower() == preferred_area else 1, _sort_key(p)),
 	)
 
 

@@ -501,6 +501,26 @@ function applyQuickFilter(input) {
 		const haystack = normalizeText(row.dataset.productText);
 		row.style.display = !term || haystack.includes(term) ? '' : 'none';
 	}
+
+	// Ocultar subtítulos de categoría que no tengan filas visibles debajo.
+	const subtitles = document.querySelectorAll('.category-subtitle');
+	for (const subtitle of subtitles) {
+		let el = subtitle.nextElementSibling;
+		let hasVisible = false;
+		while (el) {
+			if (el.classList && el.classList.contains('category-subtitle')) {
+				break; // siguiente categoría
+			}
+			if (el.classList && el.classList.contains('quick-row')) {
+				if (el.style.display !== 'none') {
+					hasVisible = true;
+					break;
+				}
+			}
+			el = el.nextElementSibling;
+		}
+		subtitle.style.display = hasVisible ? '' : 'none';
+	}
 }
 
 document.addEventListener('DOMContentLoaded', () => {
