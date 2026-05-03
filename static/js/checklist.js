@@ -502,24 +502,28 @@ function applyQuickFilter(input) {
 		row.style.display = !term || haystack.includes(term) ? '' : 'none';
 	}
 
-	// Ocultar subtítulos de categoría que no tengan filas visibles debajo.
-	const subtitles = document.querySelectorAll('.category-subtitle');
-	for (const subtitle of subtitles) {
-		let el = subtitle.nextElementSibling;
-		let hasVisible = false;
-		while (el) {
-			if (el.classList && el.classList.contains('category-subtitle')) {
-				break; // siguiente categoría
-			}
-			if (el.classList && el.classList.contains('quick-row')) {
-				if (el.style.display !== 'none') {
-					hasVisible = true;
-					break;
+	// Ocultar subtítulos de categoría SOLO dentro del panel de edición
+	// (`.edit-list-scroll`) y comprobando las filas `.quick-row` de esa sección.
+	const editScroll = document.querySelector('.edit-list-scroll');
+	if (editScroll) {
+		const subtitles = editScroll.querySelectorAll('.category-subtitle');
+		for (const subtitle of subtitles) {
+			let el = subtitle.nextElementSibling;
+			let hasVisible = false;
+			while (el && el.parentElement === editScroll) {
+				if (el.classList && el.classList.contains('category-subtitle')) {
+					break; // siguiente categoría
 				}
+				if (el.classList && el.classList.contains('quick-row')) {
+					if (el.style.display !== 'none') {
+						hasVisible = true;
+						break;
+					}
+				}
+				el = el.nextElementSibling;
 			}
-			el = el.nextElementSibling;
+			subtitle.style.display = hasVisible ? '' : 'none';
 		}
-		subtitle.style.display = hasVisible ? '' : 'none';
 	}
 }
 
