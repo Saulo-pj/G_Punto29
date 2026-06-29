@@ -19,6 +19,10 @@ from database import (
 	ChecklistPedido,
 	)
 
+# Inicializar LoginManager global para decoradores y uso antes de create_app
+login_manager = LoginManager()
+login_manager.login_view = 'login'
+
 
 def _get_operation_date():
     # Fecha/hora base de operacion; simplificada a ahora local
