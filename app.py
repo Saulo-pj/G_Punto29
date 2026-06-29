@@ -18,16 +18,25 @@ from database import (
 	ArqueoCaja,
 	ChecklistPedido,
 	)
-	if not selected_date:
-		operation_date = _get_operation_date().date()
-		session['app_date'] = operation_date.strftime('%Y-%m-%d')
-		return operation_date
-	try:
-		return datetime.strptime(selected_date, '%Y-%m-%d').date()
-	except ValueError:
-		operation_date = _get_operation_date().date()
-		session['app_date'] = operation_date.strftime('%Y-%m-%d')
-		return operation_date
+
+
+def _get_operation_date():
+    # Fecha/hora base de operacion; simplificada a ahora local
+    return datetime.now()
+
+
+def _get_selected_app_date():
+    selected_date = session.get('app_date', '').strip()
+    if not selected_date:
+        operation_date = _get_operation_date().date()
+        session['app_date'] = operation_date.strftime('%Y-%m-%d')
+        return operation_date
+    try:
+        return datetime.strptime(selected_date, '%Y-%m-%d').date()
+    except ValueError:
+        operation_date = _get_operation_date().date()
+        session['app_date'] = operation_date.strftime('%Y-%m-%d')
+        return operation_date
 
 
 def _allowed_views(user):
@@ -1652,7 +1661,7 @@ def create_app():
 			return redirect(url_for('inventario'))
 
 	flash(f'Importacion OK. Filas sincronizadas: {processed}. Registros eliminados por sincronizacion: {deleted}.', 'ok')
-		return redirect(url_for('inventario'))
+	return redirect(url_for('inventario'))
 
 	@app.route('/movimientos', methods=['GET', 'POST'])
 	@login_required
