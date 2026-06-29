@@ -17,90 +17,7 @@ from openpyxl import Workbook
 from database import (
 	ArqueoCaja,
 	ChecklistPedido,
-	PlantillaChecklistItem,
-	Area,
-	Categoria,
-	DetallePedido,
-	InventarioSede,
-	MovimientoInventario,
-	Producto,
-	Rol,
-	Sede,
-	Unidad,
-	Subarea,
-	Turno,
-	Usuario,
-	db,
-)
-
-load_dotenv()  # Carga variables desde .env en local
-
-login_manager = LoginManager()
-login_manager.login_view = 'login'
-
-DEFAULT_AREAS = {
-	'cocina': ['cocina_caliente', 'cocina_fria', 'lavadero', 'mise_en_place'],
-	'sala': ['sala'],
-}
-
-PERU_TIMEZONE = timezone(timedelta(hours=-5), name='America/Lima')
-
-
-def _slugify(value):
-	return (value or '').strip().lower().replace(' ', '_')
-
-
-def _get_area_names():
-	return [area.nombre_area for area in Area.query.order_by(Area.nombre_area).all()]
-
-
-def _get_subareas_for_area(area_name):
-	area_norm = _slugify(area_name)
-	area = Area.query.filter(db.func.lower(Area.nombre_area) == area_norm).first()
-	if not area:
-		return DEFAULT_AREAS.get(area_norm, [])
-	return [subarea.nombre_subarea for subarea in Subarea.query.filter_by(id_area=area.id_area).order_by(Subarea.nombre_subarea).all()]
-
-
-def _normalize_area(value):
-	area_norm = _slugify(value)
-	area = Area.query.filter(db.func.lower(Area.nombre_area) == area_norm).first()
-	return area.nombre_area if area else ''
-
-
-def _normalize_subarea(area, subarea):
-	area_name = _normalize_area(area)
-	if not area_name:
-		return ''
-	options = _get_subareas_for_area(area_name)
-	if not options:
-		options = DEFAULT_AREAS.get(_slugify(area_name), [])
-	sub = _slugify(subarea)
-	return sub if sub in {_slugify(option) for option in options} else (options[0] if options else '')
-
-
-def _get_operation_date(now=None):
-	now = now or datetime.now()
-	if now.hour < 4:
-		return now - timedelta(days=1)
-	return now
-
-
-def _to_peru_time(value):
-	if not value:
-		return None
-	if value.tzinfo is None:
-		value = value.replace(tzinfo=timezone.utc)
-	return value.astimezone(PERU_TIMEZONE)
-
-
-def _format_peru_datetime(value, fmt='%d/%m/%Y %H:%M'):
-	peru_value = _to_peru_time(value)
-	return peru_value.strftime(fmt) if peru_value else '-'
-
-
-def _get_selected_app_date():
-	selected_date = session.get('app_date', '').strip()
+	)
 	if not selected_date:
 		operation_date = _get_operation_date().date()
 		session['app_date'] = operation_date.strftime('%Y-%m-%d')
@@ -1734,10 +1651,7 @@ def create_app():
 			flash(f'No se pudo subir el Excel: {exc}', 'error')
 			return redirect(url_for('inventario'))
 
-		flash(
-			f'Importacion OK. Filas sincronizadas: {processed}.',
-			'ok',
-		)
+	flash(f'Importacion OK. Filas sincronizadas: {processed}. Registros eliminados por sincronizacion: {deleted}.', 'ok')
 		return redirect(url_for('inventario'))
 
 	@app.route('/movimientos', methods=['GET', 'POST'])
@@ -2074,6 +1988,17 @@ def create_app():
 					)
 				selected_items = selected_items_query.order_by(Producto.nombre_producto.asc()).all()
 
+				# Nombre legible de sede/turno para la UI de impresión
+				selected_sede_nombre = ''
+				selected_turno_nombre = ''
+				if selected_pedido:
+					if selected_pedido.id_sede:
+						sede_obj = Sede.query.get(selected_pedido.id_sede)
+						selected_sede_nombre = sede_obj.nombre_sede if sede_obj else ''
+					if selected_pedido.id_turno:
+						turno_obj = Turno.query.get(selected_pedido.id_turno)
+						selected_turno_nombre = turno_obj.nombre_turno if turno_obj else ''
+
 		pedido_area_map = {}
 		for pedido_obj, _, _ in pedido_rows:
 			areas = db.session.query(Producto.area).join(
@@ -2092,7 +2017,9 @@ def create_app():
 			selected_items=selected_items,
 			pedido_area_map=pedido_area_map,
 			productos=Producto.query.order_by(Producto.nombre_producto).all(),
-			can_insert=current_user.can_write('pedidos', 'insert'),
+				can_insert=current_user.can_write('pedidos', 'insert'),
+				selected_sede_nombre=selected_sede_nombre,
+				selected_turno_nombre=selected_turno_nombre,
 			can_update=can_update,
 			can_delete_requested=can_delete_requested,
 		)
@@ -2700,7 +2627,7 @@ def create_app():
 			is_admin_general=is_admin_general,
 			can_insert=current_user.can_write('arqueo', 'insert'),
 			can_update=current_user.can_write('arqueo', 'update'),
-				loop_month=selected_date.strftime('%Y-%m') if is_admin_general else '',
+			loop_month=selected_date.strftime('%Y-%m') if is_admin_general else '',
 		)
 
 	@app.route('/arqueo/dashboard', methods=['GET'])

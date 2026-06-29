@@ -21,7 +21,7 @@
 
 	<section class="pedidos-detail-card">
 		{% if selected_pedido %}
-		<div class="pedidos-detail-head">
+		<div class="pedidos-detail-head" data-sede="{{ selected_sede_nombre or '' }}" data-turno="{{ selected_turno_nombre or '' }}">
 			<h3>Pedido #{{ selected_pedido.id_pedido }}</h3>
 			<span class="status-pill {% if selected_pedido.estado_general == 'Enviado' %}info{% elif selected_pedido.estado_general == 'Pendiente' %}warn{% endif %}">{{ selected_pedido.estado_general }}</span>
 			<div class="pedidos-detail-actions">

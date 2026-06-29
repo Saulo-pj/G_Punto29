@@ -8,10 +8,7 @@ function setFormScroll(form) {
 	}
 	input.value = String(Math.max(window.scrollY || 0, 0));
 }
-
-function restoreScrollFromQuery() {
-	const params = new URLSearchParams(window.location.search);
-	const y = parseInt(params.get('scroll_y') || '', 10);
+	}
 	if (!Number.isNaN(y)) {
 		window.scrollTo({ top: Math.max(y, 0), behavior: 'auto' });
 	}
@@ -208,6 +205,12 @@ function bindPedidosAsyncForms() {
 					const header = detailCard ? detailCard.querySelector('.pedidos-detail-head h3') : null;
 					const pedidoText = header ? header.textContent.trim() : '';
 					const items = [];
+					const headEl = detailCard ? detailCard.querySelector('.pedidos-detail-head') : null;
+					const subtitleEl = headEl ? headEl.querySelector('.status-pill') : null;
+					const sedeName = headEl ? (headEl.dataset.sede || '') : '';
+					const turnoName = headEl ? (headEl.dataset.turno || '') : '';
+					const subtitleText = subtitleEl ? subtitleEl.textContent.trim() : '';
+					const sentSubtitle = subtitleText + (sedeName || turnoName ? (' | ' + sedeName + (sedeName && turnoName ? ' / ' : '') + turnoName) : '');
 					const lines = detailCard ? detailCard.querySelectorAll('.pedidos-lines .pedido-line-text') : [];
 					for (const line of lines) {
 						const nameEl = line.querySelector('.pedido-line-name');
@@ -221,7 +224,7 @@ function bindPedidosAsyncForms() {
 						}
 						items.push({ name, qty });
 					}
-					showSentModal('PRODUCTOS ENVIADOS', pedidoText + ' | Almacén', items);
+					showSentModal('PRODUCTOS ENVIADOS', pedidoText + ' | ' + sentSubtitle, items);
 				} catch (e) {
 					// silencioso
 				}
