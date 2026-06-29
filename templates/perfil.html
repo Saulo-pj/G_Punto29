@@ -1,0 +1,57 @@
+{% extends 'base.html' %}
+{% block title %}Mi Perfil{% endblock %}
+{% block content %}
+<h1>Mi perfil</h1>
+<p class="muted">Actualiza tus datos personales y tu contraseña.</p>
+
+<form method="POST" class="card profile-form">
+	<h3>Informacion personal</h3>
+	<div class="grid-2">
+		<div>
+			<label>ID usuario</label>
+			<input type="text" value="{{ current_user.id_usuario }}" disabled>
+		</div>
+		<div>
+			<label>Username</label>
+			<input type="text" value="{{ current_user.username }}" disabled>
+		</div>
+		<div>
+			<label>DNI</label>
+			<input type="text" name="dni" value="{{ current_user.dni or '' }}" placeholder="Ej: 12345678">
+		</div>
+		<div>
+			<label>Fecha de nacimiento</label>
+			<input type="date" name="fecha_nacimiento" value="{{ current_user.fecha_nacimiento.strftime('%Y-%m-%d') if current_user.fecha_nacimiento else '' }}">
+		</div>
+		<div>
+			<label>Email</label>
+			<input type="email" name="email" value="{{ current_user.email or '' }}" placeholder="correo@dominio.com">
+		</div>
+		<div>
+			<label>Telefono</label>
+			<input type="text" name="telefono" value="{{ current_user.telefono or '' }}" placeholder="Ej: 999888777">
+		</div>
+	</div>
+	<label>Direccion</label>
+	<input type="text" name="direccion" value="{{ current_user.direccion or '' }}" placeholder="Direccion principal">
+	<label>Mas informacion</label>
+	<textarea name="bio" rows="3" placeholder="Notas adicionales del usuario">{{ current_user.bio or '' }}</textarea>
+
+	<h3>Cambiar contraseña</h3>
+	<p class="muted">Completa estos campos solo si quieres actualizarla.</p>
+	<div class="grid-2">
+		<div>
+			<label>Contraseña actual</label>
+			<input type="password" name="password_actual" autocomplete="current-password">
+		</div>
+		<div>
+			<label>Nueva contraseña</label>
+			<input type="password" name="nueva_password" autocomplete="new-password">
+		</div>
+	</div>
+	<label>Confirmar nueva contraseña</label>
+	<input type="password" name="confirm_password" autocomplete="new-password">
+
+	<button type="submit">Guardar mi perfil</button>
+</form>
+{% endblock %}

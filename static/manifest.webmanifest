@@ -1,0 +1,23 @@
+{
+  "name": "Punto 29",
+  "short_name": "Punto29",
+  "description": "Sistema de inventario, pedidos y checklist",
+  "lang": "es",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#101828",
+  "icons": [
+    {
+      "src": "/static/img/icono.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/static/img/icono.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
