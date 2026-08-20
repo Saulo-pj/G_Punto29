@@ -1089,7 +1089,7 @@ def _ensure_inventory_schema(app):
 	with db.engine.begin() as connection:
 		if not inspect(db.engine).has_table('recordatorios_cierre'):
 			RecordatorioCierre.__table__.create(bind=db.engine)
-		connection.execute(text("UPDATE arqueo_caja SET venta_sistema_guardada = 1 WHERE venta_sistema IS NOT NULL AND venta_sistema != 0 AND venta_sistema_guardada = 0"))
+		connection.execute(text("UPDATE arqueo_caja SET venta_sistema_guardada = TRUE WHERE venta_sistema IS NOT NULL AND venta_sistema != 0 AND venta_sistema_guardada = FALSE"))
 		connection.execute(
 			text(
 				"""
