@@ -79,7 +79,7 @@ function obtenerNombresCargos(trabajador) {
 
 function agregarTrabajador(datos) {
 
-    const trabajadores = obtenerTrabajadores();
+    const trabajadores = obtenerColeccion("trabajadores");
 
     const nuevoTrabajador = {
 
@@ -112,7 +112,7 @@ function agregarTrabajador(datos) {
 
 function editarTrabajador(id, cambios) {
 
-    const trabajadores = obtenerTrabajadores();
+    const trabajadores = obtenerColeccion("trabajadores");
 
     const indice = trabajadores.findIndex(
 
@@ -290,7 +290,7 @@ function eliminarTrabajador(id) {
 
     const trabajadores =
 
-        obtenerTrabajadores()
+        obtenerColeccion("trabajadores")
 
             .filter(
 

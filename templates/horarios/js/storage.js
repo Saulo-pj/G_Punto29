@@ -3,6 +3,7 @@
 ========================================================= */
 
 const STORAGE_KEY = "organizador_horarios_data";
+const REMOTE_WORKERS_CLEANUP_KEY = "horarios_remote_workers_cleaned_v1";
 let catalogosHorarios = { sedes: [], turnos: [] };
 let agendaPersistenciaLista = false;
 
@@ -27,12 +28,33 @@ async function sincronizarAgendaConServidor() {
     if (!respuesta.ok) throw new Error("No se pudieron cargar los datos persistidos.");
     const remoto = await respuesta.json();
     if (remoto.exists && remoto.datos) {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizarDatos(remoto.datos)));
+        const datosRemotos = normalizarDatos(remoto.datos);
+        if (datosRemotos.configuracion.horariosWorkersCleanedV1 !== true) {
+            datosRemotos.trabajadores = [];
+            datosRemotos.configuracion.horariosWorkersCleanedV1 = true;
+            const limpieza = await fetch("/api/horarios/datos", { method: "PUT", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify(datosRemotos) });
+            if (!limpieza.ok) throw new Error("No se pudieron limpiar los trabajadores locales.");
+            localStorage.setItem(REMOTE_WORKERS_CLEANUP_KEY, "1");
+        }
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(datosRemotos));
         agendaPersistenciaLista = true;
         return;
     }
-    const local = obtenerDatos();
-    const guardado = await fetch("/api/horarios/datos", { method: "PUT", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify(local) });
+    const datosInicialesRemotos = normalizarDatos({
+        configuracion: {},
+        sedes: catalogosHorarios.sedes,
+        turnos: catalogosHorarios.turnos,
+        areas: [],
+        cargos: [],
+        trabajadores: [],
+        permisos: [],
+        excepciones: [],
+        asistencias: [],
+        historial: []
+    });
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(datosInicialesRemotos));
+    localStorage.setItem(REMOTE_WORKERS_CLEANUP_KEY, "1");
+    const guardado = await fetch("/api/horarios/datos", { method: "PUT", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify(datosInicialesRemotos) });
     if (!guardado.ok) throw new Error("No se pudieron migrar los datos locales.");
     agendaPersistenciaLista = true;
 }
@@ -69,22 +91,10 @@ function inicializarStorage() {
 
     if (!datosGuardados) {
 
-        const datosBase = JSON.parse(JSON.stringify(DATOS_INICIALES));
-        const semilla = generarDatosSemilla();
-        const seeding = {
-            ...semilla,
-            trabajadores: semilla.trabajadores.length ? semilla.trabajadores : datosBase.trabajadores,
-            sedes: semilla.sedes.length ? semilla.sedes : datosBase.sedes,
-            turnos: semilla.turnos.length ? semilla.turnos : datosBase.turnos,
-            areas: semilla.areas.length ? semilla.areas : datosBase.areas,
-            cargos: semilla.cargos.length ? semilla.cargos : datosBase.cargos,
-            permisos: datosBase.permisos || [],
-            excepciones: datosBase.excepciones || [],
-            asistencias: datosBase.asistencias || [],
-            historial: datosBase.historial || []
-        };
-
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizarDatos(seeding)));
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizarDatos({
+            configuracion: {}, sedes: [], turnos: [], areas: [], cargos: [],
+            trabajadores: [], permisos: [], excepciones: [], asistencias: [], historial: []
+        })));
 
     }
 
