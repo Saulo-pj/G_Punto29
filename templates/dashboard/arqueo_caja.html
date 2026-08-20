@@ -192,7 +192,7 @@
 	<div class="grid-2 arqueo-summary-grid">
 		<div><strong>Total ingresos:</strong> <span id="sum-total-ingresos">{{ '%.2f'|format(resumen.total_ingresos) }}</span></div>
 		<div><strong>Gastos totales:</strong> <span id="sum-gastos">{{ '%.2f'|format(resumen.gastos_totales) }}</span></div>
-		<div><strong>Subtotal:</strong> <span id="sum-subtotal">{{ '%.2f'|format(resumen.subtotal) }}</span></div>
+		<div><strong>Subtotal (Total de ingresos + Gastos totales):</strong> <span id="sum-subtotal">{{ '%.2f'|format(resumen.subtotal) }}</span></div>
 		<div><strong>Total (subtotal - inicial):</strong> <span id="sum-total-operativo">{{ '%.2f'|format(resumen.subtotal - (cierre.monto_inicial if cierre else 0)) }}</span></div>
 		<div><strong>Diferencia vs sistema:</strong>
 			<span id="sum-diferencia-pill" class="status-pill {% if resumen.diferencia > 0 %}ok{% elif resumen.diferencia < 0 %}error{% endif %}">
@@ -286,7 +286,7 @@
 	<div style="margin-top:14px;border-top:1px solid #e5e7eb;padding-top:10px;font-size:12px;">
 		<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;"><span>Total Ingresos</span><strong id="ticket-total-ingresos">{{ '%.2f'|format(resumen.total_ingresos if resumen else 0) }}</strong></div>
 		<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;"><span>Gastos Totales</span><strong id="ticket-gastos">{{ '%.2f'|format(resumen.gastos_totales if resumen else 0) }}</strong></div>
-		<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;"><span>Subtotal</span><strong id="ticket-subtotal">{{ '%.2f'|format(resumen.subtotal if resumen else 0) }}</strong></div>
+		<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;"><span>Subtotal (Total de ingresos + Gastos totales)</span><strong id="ticket-subtotal">{{ '%.2f'|format(resumen.subtotal if resumen else 0) }}</strong></div>
 		<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;"><span>Total Real</span><strong id="ticket-total-real">{{ '%.2f'|format((resumen.subtotal if resumen else 0) - (expected_base|default(0))) }}</strong></div>
 		<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;"><span>Venta POS</span><strong id="ticket-venta-sistema">{{ '%.2f'|format(cierre.venta_sistema if cierre else 0) }}</strong></div>
 		<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;"><span>Efectivo entregado</span><strong id="ticket-efectivo-entregado">{{ '%.2f'|format(cierre.efectivo_entregado if cierre else 0) }}</strong></div>
@@ -375,6 +375,7 @@
 
 		function lockSavedFields(fields) {
 			if (isAdminGeneral) {
+				lockedFields.clear();
 				document.querySelectorAll('input, select, textarea, button').forEach(function (element) {
 					if (!element.classList.contains('arqueo-save-sticky') && !element.classList.contains('section-save-hint')) element.disabled = false;
 				});
@@ -405,7 +406,7 @@
 		}
 
 		function lockSavedGastos() {
-			if (ventaSistemaGuardada) return;
+			if (isAdminGeneral || ventaSistemaGuardada) return;
 			list.querySelectorAll('.gasto-item').forEach(function (row) {
 				var amount = row.querySelector('[name="gasto_monto[]"]');
 				if (amount && toNum(amount.value) > 0) {
@@ -469,7 +470,7 @@
 		}
 
 		function markDirty(name) {
-			if (!lockedFields.has(name)) dirtyFields.add(name);
+			if (!lockedFields.has(name) || isAdminGeneral) dirtyFields.add(name);
 			clearTimeout(autosaveTimer);
 			autosaveTimer = setTimeout(function () { saveChanged('AUTOGUARDADO_5MIN'); }, 300000);
 		}
@@ -477,6 +478,7 @@
 		document.querySelectorAll('input, select, textarea').forEach(function (element) {
 			if (element.name && element.name !== 'section' && element.name !== 'gasto_tipo[]' && element.name !== 'gasto_nombre[]' && element.name !== 'gasto_monto[]') {
 				element.addEventListener('input', function () { markDirty(element.name); });
+					if (element.name === 'efectivo_entregado') element.addEventListener('focus', function () { markDirty(element.name); });
 			}
 			if (element.name && element.closest('#gastos-list')) {
 				element.addEventListener('input', function () { markDirty('gastos'); });
@@ -596,7 +598,7 @@
 			});
 
 			var totalIngresos = pos + yape + plin + efectivo;
-			var subtotal = totalIngresos - totalGastos;
+			var subtotal = totalIngresos + totalGastos;
 			var totalOperativo = subtotal - montoInicial;
 			var diferencia = (subtotal - montoInicial) - ventaSistema;
 

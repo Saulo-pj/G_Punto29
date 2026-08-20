@@ -535,7 +535,7 @@ def _audit_arqueo_event(arqueo, tipo_evento, campo, valor_anterior, valor_nuevo)
 def _calc_cierre_operativo(monto_inicial, pos_tarjetas, yape, plin, efectivo, venta_sistema, gastos):
 	total_ingresos = pos_tarjetas + yape + plin + efectivo
 	gastos_totales = sum(_safe_float(item.get('monto'), 0.0) for item in (gastos or []))
-	subtotal = total_ingresos - gastos_totales
+	subtotal = total_ingresos + gastos_totales
 	diferencia = (subtotal - monto_inicial) - venta_sistema
 	estado_diferencia = 'Cuadre exacto'
 	if diferencia > 0:
@@ -3375,7 +3375,10 @@ def create_app():
 				+ _safe_float(arqueo.plin, 0.0)
 				+ _safe_float(arqueo.efectivo, 0.0)
 			)
-			gastos_totales = total_ingresos - subtotal
+			try:
+				gastos_totales = sum(_safe_float(item.get('monto'), 0.0) for item in json.loads(arqueo.gastos_json or '[]'))
+			except (TypeError, ValueError):
+				gastos_totales = 0.0
 			diferencia = (subtotal - monto_inicial) - venta_sistema
 			estado = 'Cuadre exacto'
 			if diferencia > 0:
@@ -3526,7 +3529,10 @@ def create_app():
 				+ _safe_float(arqueo.plin, 0.0)
 				+ _safe_float(arqueo.efectivo, 0.0)
 			)
-			gastos = total_ing - _safe_float(arqueo.monto_final, 0.0)
+			try:
+				gastos = sum(_safe_float(item.get('monto'), 0.0) for item in json.loads(arqueo.gastos_json or '[]'))
+			except (TypeError, ValueError):
+				gastos = 0.0
 			trend_sede_data[sede_label][fecha_key] += gastos
 
 		palette = ['#E6C682', '#4A4A4A', '#2D2D2D', '#B98E38', '#7A7A7A']
@@ -3604,7 +3610,10 @@ def create_app():
 				+ _safe_float(arqueo.plin, 0.0)
 				+ _safe_float(arqueo.efectivo, 0.0)
 			)
-			gastos_item = total_ingresos_item - _safe_float(arqueo.monto_final, 0.0)
+			try:
+				gastos_item = sum(_safe_float(item.get('monto'), 0.0) for item in json.loads(arqueo.gastos_json or '[]'))
+			except (TypeError, ValueError):
+				gastos_item = 0.0
 			ganancia_item = _safe_float(arqueo.monto_final, 0.0) - _safe_float(arqueo.monto_inicial, 0.0)
 
 			if arqueo.fecha and arqueo.fecha >= week_start:
@@ -3698,7 +3707,7 @@ def create_app():
 	def _report_metrics(arqueo, gastos):
 		total_ingresos = sum(_safe_float(getattr(arqueo, field), 0.0) for field in ('pos_tarjetas', 'yape', 'plin', 'efectivo'))
 		gastos_total = sum(_safe_float(item.get('monto'), 0.0) for item in gastos)
-		subtotal = total_ingresos - gastos_total
+		subtotal = total_ingresos + gastos_total
 		operativo = subtotal - _safe_float(arqueo.monto_inicial, 0.0)
 		diferencia = operativo - _safe_float(arqueo.venta_sistema, 0.0)
 		return total_ingresos, gastos_total, subtotal, operativo, diferencia
