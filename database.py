@@ -12,6 +12,8 @@ class Sede(db.Model):
 	__tablename__ = 'sedes'
 	id_sede = db.Column(db.Integer, primary_key=True)
 	nombre_sede = db.Column(db.String(50), nullable=False)  # Almacen, Sede_17, Sede_20
+	# Monto inicial base esperado por esta sede, definido por Admin General
+	monto_inicial_base_esperado = db.Column(db.Float, default=0.0)
 
 
 class Rol(db.Model):
@@ -24,6 +26,18 @@ class Turno(db.Model):
 	__tablename__ = 'turnos'
 	id_turno = db.Column(db.String(20), primary_key=True)  # Manana, Noche, N/A
 	nombre_turno = db.Column(db.String(50), nullable=False)
+
+
+class RecordatorioCierre(db.Model):
+	__tablename__ = 'recordatorios_cierre'
+	id_recordatorio = db.Column(db.Integer, primary_key=True)
+	id_sede = db.Column(db.Integer, db.ForeignKey('sedes.id_sede'), nullable=False)
+	id_turno = db.Column(db.String(20), db.ForeignKey('turnos.id_turno'), nullable=False)
+	hora_cierre = db.Column(db.String(5), nullable=False, default='23:00')
+	activo = db.Column(db.Boolean, default=True)
+	actualizado_en = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+	__table_args__ = (UniqueConstraint('id_sede', 'id_turno', name='uq_recordatorio_sede_turno'),)
 
 
 class Categoria(db.Model):
@@ -88,10 +102,10 @@ class Usuario(UserMixin, db.Model):
 
 	def can_view(self, vista):
 		permissions = {
-			'admin_general': {'inventario', 'movimientos', 'pedidos', 'checklist', 'arqueo', 'ajustes', 'dashboard'},
-			'admin_almacen': {'inventario', 'movimientos', 'pedidos', 'dashboard'},
+			'admin_general': {'inventario', 'movimientos', 'pedidos', 'checklist', 'arqueo', 'ajustes', 'mermas', 'incidencias', 'horarios', 'dashboard'},
+			'admin_almacen': {'inventario', 'movimientos', 'pedidos', 'horarios', 'dashboard'},
 			'personal_prod': {'inventario', 'movimientos', 'pedidos', 'dashboard'},
-			'admin_sala': {'checklist', 'arqueo', 'dashboard'},
+			'admin_sala': {'checklist', 'arqueo', 'mermas', 'incidencias', 'horarios', 'dashboard'},
 			'cocinero': {'checklist', 'dashboard'},
 		}
 		return vista in permissions.get(self.rol_nombre, set())
@@ -106,11 +120,15 @@ class Usuario(UserMixin, db.Model):
 				'checklist': full,
 				'arqueo': full,
 				'ajustes': full,
+				'mermas': full,
+				'incidencias': full,
+				'horarios': full,
 			},
 			'admin_almacen': {
 				'inventario': full,
 				'movimientos': full,
 				'pedidos': full,
+				'horarios': {'insert', 'update'},
 			},
 			'personal_prod': {
 				'movimientos': {'insert'},
@@ -119,6 +137,9 @@ class Usuario(UserMixin, db.Model):
 			'admin_sala': {
 				'checklist': full,
 				'arqueo': full,
+				'mermas': {'insert'},
+				'incidencias': {'insert'},
+				'horarios': {'insert', 'update'},
 			},
 			'cocinero': {
 				'checklist': {'insert'},
@@ -137,6 +158,7 @@ class Producto(db.Model):
 	area = db.Column(db.String(20))  # Cocina o Sala
 	subarea = db.Column(db.String(50))
 	unidad = db.Column(db.String(50))
+	costo_unitario = db.Column(db.Float, default=0.0)
 	estado = db.Column(db.String(20), default='Activo')
 
 
@@ -215,6 +237,102 @@ class ArqueoCaja(db.Model):
 	yape = db.Column(db.Float, default=0.0)
 	plin = db.Column(db.Float, default=0.0)
 	efectivo = db.Column(db.Float, default=0.0)
+	efectivo_a_entregar = db.Column(db.Float, default=0.0)
+	# Efectivo realmente entregado por el administrador de sede (entrada manual)
+	efectivo_entregado = db.Column(db.Float, default=0.0)
+	efectivo_dejado_caja_recomendado = db.Column(db.Float, default=0.0)
+	efectivo_dejado_caja_real = db.Column(db.Float, default=0.0)
+	diferencia_efectivo_dejado = db.Column(db.Float, default=0.0)
+	seccion_1_guardada = db.Column(db.Boolean, default=False)
+	efectivo_entregado_guardado = db.Column(db.Boolean, default=False)
+	efectivo_dejado_guardado = db.Column(db.Boolean, default=False)
+	campos_bloqueados_json = db.Column(db.Text, default='[]')
+	venta_sistema_guardada = db.Column(db.Boolean, default=False)
 	venta_sistema = db.Column(db.Float, default=0.0)
 	gastos_json = db.Column(db.Text, default='[]')
 	observaciones = db.Column(db.Text)
+
+
+class ArqueoCajaHistorial(db.Model):
+	__tablename__ = 'arqueo_caja_historial'
+	id_historial = db.Column(db.Integer, primary_key=True)
+	id_arqueo = db.Column(db.Integer, db.ForeignKey('arqueo_caja.id_arqueo'), nullable=False)
+	usuario_id = db.Column(db.String(50), db.ForeignKey('usuarios.id_usuario'))
+	accion = db.Column(db.String(50), nullable=False)
+	tipo_evento = db.Column(db.String(30), default='GUARDADO_MANUAL')
+	campo_o_seccion_afectada = db.Column(db.String(120))
+	fecha_hora = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+	valor_anterior = db.Column(db.Text)
+	valor_nuevo = db.Column(db.Text)
+
+
+class Merma(db.Model):
+	__tablename__ = 'mermas'
+	id_merma = db.Column(db.Integer, primary_key=True)
+	fecha = db.Column(db.Date, nullable=False, default=lambda: datetime.utcnow().date())
+	mes = db.Column(db.String(7), nullable=False)
+	turno = db.Column(db.String(20), nullable=False)
+	area = db.Column(db.String(80), nullable=False)
+	id_producto = db.Column(db.String(50), db.ForeignKey('productos.id_producto'), nullable=False)
+	tipo_merma = db.Column(db.String(80), nullable=False)
+	cantidad = db.Column(db.Float, nullable=False)
+	unidad = db.Column(db.String(50), nullable=False)
+	costo_unitario = db.Column(db.Float, nullable=False, default=0.0)
+	costo_total = db.Column(db.Float, nullable=False, default=0.0)
+	responsable = db.Column(db.String(100), nullable=False)
+	observaciones = db.Column(db.Text)
+	id_sede = db.Column(db.Integer, db.ForeignKey('sedes.id_sede'), nullable=False)
+	id_usuario = db.Column(db.String(50), db.ForeignKey('usuarios.id_usuario'), nullable=False)
+	bloqueada = db.Column(db.Boolean, default=False, nullable=False)
+	producto = db.relationship('Producto')
+	sede = db.relationship('Sede')
+
+
+class Incidencia(db.Model):
+	__tablename__ = 'incidencias'
+	id_incidencia = db.Column(db.Integer, primary_key=True)
+	fecha = db.Column(db.Date, nullable=False, default=lambda: datetime.utcnow().date())
+	mes = db.Column(db.String(7), nullable=False)
+	incidencia = db.Column(db.String(120), nullable=False)
+	descripcion = db.Column(db.Text)
+	responsable = db.Column(db.String(100), nullable=False)
+	encargado = db.Column(db.String(100), nullable=False)
+	descuento = db.Column(db.Boolean, default=False, nullable=False)
+	monto = db.Column(db.Float, default=0.0, nullable=False)
+	proceso = db.Column(db.String(30), default='evaluacion', nullable=False)
+	id_sede = db.Column(db.Integer, db.ForeignKey('sedes.id_sede'), nullable=False)
+	id_usuario = db.Column(db.String(50), db.ForeignKey('usuarios.id_usuario'), nullable=False)
+	bloqueada = db.Column(db.Boolean, default=False, nullable=False)
+	sede = db.relationship('Sede')
+
+
+class CatalogoMerma(db.Model):
+	__tablename__ = 'catalogos_merma'
+	id_catalogo = db.Column(db.Integer, primary_key=True)
+	categoria = db.Column(db.String(30), nullable=False)
+	nombre = db.Column(db.String(100), nullable=False)
+	activo = db.Column(db.Boolean, default=True, nullable=False)
+
+	__table_args__ = (UniqueConstraint('categoria', 'nombre', name='uq_catalogo_merma_categoria_nombre'),)
+
+
+class AgendaAuditoria(db.Model):
+	__tablename__ = 'agenda_auditoria'
+	id_auditoria = db.Column(db.Integer, primary_key=True)
+	id_usuario = db.Column(db.String(50), db.ForeignKey('usuarios.id_usuario'), nullable=False)
+	accion = db.Column(db.String(40), nullable=False)
+	entidad = db.Column(db.String(40), nullable=False)
+	detalle_json = db.Column(db.Text)
+	fecha_hora = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+	usuario = db.relationship('Usuario')
+
+
+class AgendaPersistencia(db.Model):
+	__tablename__ = 'agenda_persistencia'
+	id_agenda = db.Column(db.Integer, primary_key=True, default=1)
+	datos_json = db.Column(db.Text, nullable=False, default='{}')
+	actualizado_por = db.Column(db.String(50), db.ForeignKey('usuarios.id_usuario'))
+	actualizado_en = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+	usuario = db.relationship('Usuario')

@@ -1,0 +1,545 @@
+/* =========================================================
+   RESPONSIVE
+========================================================= */
+
+
+/* =========================================================
+   LAPTOP PEQUEÑA
+========================================================= */
+
+@media (max-width: 1200px) {
+
+    :root {
+
+        --sidebar-width: 220px;
+
+    }
+
+
+    .stats-grid {
+
+        grid-template-columns:
+            repeat(2, 1fr);
+
+    }
+
+
+    .secondary-stats {
+
+        grid-template-columns:
+            repeat(2, 1fr);
+
+    }
+
+
+    .cards-grid {
+
+        grid-template-columns:
+            repeat(2, 1fr);
+
+    }
+
+
+    .report-cards {
+
+        grid-template-columns:
+            repeat(2, 1fr);
+
+    }
+
+}
+
+
+/* =========================================================
+   TABLET
+========================================================= */
+
+@media (max-width: 900px) {
+
+    .sidebar {
+
+        transform: translateX(-100%);
+
+        transition: transform 0.25s ease;
+
+        box-shadow: var(--shadow-lg);
+
+    }
+
+
+    .sidebar.open {
+
+        transform: translateX(0);
+
+    }
+
+
+    .main-content {
+
+        margin-left: 0;
+
+        width: 100%;
+
+    }
+
+
+    .mobile-menu-button {
+
+        display: flex;
+
+        align-items: center;
+
+        justify-content: center;
+
+    }
+
+
+    .topbar {
+
+        padding: 0 20px;
+
+    }
+
+
+    .content-wrapper {
+
+        padding: 22px 20px 40px;
+
+    }
+
+
+    .dashboard-grid {
+
+        grid-template-columns: 1fr;
+
+    }
+
+
+    .filters-card {
+
+        flex-wrap: wrap;
+
+    }
+
+
+    .filter-group {
+
+        flex: 1;
+
+        min-width: 180px;
+
+    }
+
+}
+
+
+/* =========================================================
+   TABLET PEQUEÑA
+========================================================= */
+
+@media (max-width: 700px) {
+
+    .topbar {
+
+        height: 65px;
+
+    }
+
+
+    .page-title h1 {
+
+        font-size: 17px;
+
+    }
+
+
+    .page-title p {
+
+        display: none;
+
+    }
+
+
+    .user-info,
+    .user-profile > i {
+
+        display: none;
+
+    }
+
+
+    .user-profile {
+
+        border-left: none;
+
+        padding-left: 0;
+
+    }
+
+
+    .section-header {
+
+        align-items: flex-start;
+
+        flex-direction: column;
+
+    }
+
+
+    .section-actions {
+
+        width: 100%;
+
+    }
+
+
+    .section-actions .btn {
+
+        flex: 1;
+
+    }
+
+
+    .stats-grid {
+
+        grid-template-columns: 1fr 1fr;
+
+    }
+
+
+    .secondary-stats {
+
+        grid-template-columns: 1fr 1fr;
+
+    }
+
+
+    .cards-grid {
+
+        grid-template-columns: 1fr;
+
+    }
+
+
+    .report-cards {
+
+        grid-template-columns: 1fr;
+
+    }
+
+
+    .form-grid {
+
+        grid-template-columns: 1fr;
+
+    }
+
+
+    .form-group.full-width {
+
+        grid-column: auto;
+
+    }
+
+
+    .day-summary {
+
+        grid-template-columns:
+            repeat(2, 1fr);
+
+    }
+
+
+    .day-actions {
+
+        grid-template-columns: 1fr;
+
+    }
+
+
+    .quick-calendar {
+
+        grid-template-columns:
+            repeat(2, 1fr);
+
+    }
+
+}
+
+
+/* =========================================================
+   CELULAR
+========================================================= */
+
+@media (max-width: 500px) {
+
+    .content-wrapper {
+
+        padding: 18px 12px 30px;
+
+    }
+
+
+    .topbar {
+
+        padding: 0 12px;
+
+    }
+
+
+    .stats-grid {
+
+        grid-template-columns: 1fr;
+
+    }
+
+
+    .secondary-stats {
+
+        grid-template-columns: 1fr 1fr;
+
+    }
+
+
+    .stat-card {
+
+        padding: 14px;
+
+    }
+
+
+    .stat-information > strong {
+
+        font-size: 20px;
+
+    }
+
+
+    .filters-card {
+
+        flex-direction: column;
+
+        align-items: stretch;
+
+    }
+
+
+    .filter-group {
+
+        width: 100%;
+
+        min-width: 0;
+
+    }
+
+
+    .calendar-header {
+
+        gap: 8px;
+
+    }
+
+
+    .calendar-title h2 {
+
+        min-width: 120px;
+
+        font-size: 13px;
+
+    }
+
+
+    .calendar-day {
+
+        min-height: 80px;
+
+        padding: 5px;
+
+    }
+
+
+    .day-number {
+
+        width: 21px;
+        height: 21px;
+
+        font-size: 9px;
+
+    }
+
+
+    .day-worker-count span {
+
+        font-size: 7px;
+
+    }
+
+
+    .mini-stat {
+
+        font-size: 6px;
+
+        padding: 2px 3px;
+
+    }
+
+
+    .day-event {
+
+        font-size: 6px;
+
+    }
+
+
+    .calendar-weekdays > div {
+
+        font-size: 7px;
+
+        padding: 7px 2px;
+
+    }
+
+
+    .calendar-legend {
+
+        gap: 8px;
+
+    }
+
+
+    .calendar-legend span {
+
+        font-size: 7px;
+
+    }
+
+
+    .modal-overlay {
+
+        padding: 8px;
+
+    }
+
+
+    .modal {
+
+        max-height: 95vh;
+
+        border-radius: 10px;
+
+    }
+
+
+    .modal-header {
+
+        padding: 16px;
+
+    }
+
+
+    .modal-body {
+
+        padding: 16px;
+
+    }
+
+
+    .modal-footer {
+
+        padding: 12px 16px;
+
+    }
+
+
+    .modal-footer .btn {
+
+        flex: 1;
+
+    }
+
+
+    .toast-container {
+
+        left: 10px;
+
+        right: 10px;
+
+        bottom: 10px;
+
+    }
+
+
+    .toast {
+
+        min-width: 0;
+
+        width: 100%;
+
+    }
+
+}
+
+
+/* =========================================================
+   CELULAR MUY PEQUEÑO
+========================================================= */
+
+@media (max-width: 360px) {
+
+    .secondary-stats {
+
+        grid-template-columns: 1fr;
+
+    }
+
+
+    .calendar-day {
+
+        min-height: 65px;
+
+    }
+
+
+    .day-worker-count i {
+
+        display: none;
+
+    }
+
+
+    .day-worker-count span {
+
+        font-size: 6px;
+
+    }
+
+
+    .mini-stat {
+
+        display: none;
+
+    }
+
+}
+
+@media (max-width: 700px) {
+    .attendance-summary { grid-template-columns: repeat(2, 1fr); }
+    .profile-grid { grid-template-columns: repeat(2, 1fr); }
+    .section-actions { flex-wrap: wrap; }
+    .attendance-summary { overflow-x: auto; grid-template-columns: repeat(6, 120px); }
+    .profile-month-grid { grid-template-columns: repeat(7, 1fr); }
+    .profile-modal { max-width: 100%; max-height: 92vh; }
+    .profile-modal .modal-body { padding: 12px; }
+    .profile-month-toolbar { grid-template-columns: 32px 1fr 32px; }
+    .profile-month-toolbar .btn { grid-column: 1 / -1; width: 100%; }
+    .profile-month-toolbar h3 { font-size: 14px; }
+    .profile-month-day { min-height: 86px; padding: 4px 3px; }
+    .profile-month-empty { min-height: 86px; }
+    .profile-weekday { font-size: 9px; }
+    .profile-temporal-label, .profile-shift, .attendance-inline, .punctuality-badge { font-size: 8px; }
+    .profile-modal .modal-footer { position: sticky; bottom: 0; padding: 10px 12px; }
+    #workerDayEditorModal .modal-footer { position: sticky; bottom: 0; }
+    .attendance-legend { padding: 10px; }
+    .attendance-legend-items { grid-template-columns: 1fr; }
+    .attendance-legend-section h4 { display: grid; gap: 2px; }
+}

@@ -139,6 +139,7 @@
 							<option value="{{ u.nombre_unidad }}" {% if u.nombre_unidad == prod.unidad %}selected{% endif %}>{{ u.nombre_unidad }}</option>
 							{% endfor %}
 						</select>
+						<input type="number" step="0.01" min="0" name="costo_unitario" value="{{ prod.costo_unitario or 0 }}" placeholder="Costo unitario">
 						<input type="number" step="0.01" name="punto_minimo" value="{{ inv.punto_minimo if inv else 0 }}" placeholder="Punto minimo">
 						<input type="number" step="0.01" name="stock_actual" value="{{ inv.stock_actual if inv else 0 }}" placeholder="Stock central">
 						<select name="estado">
@@ -266,6 +267,7 @@
 					<option value="{{ u.nombre_unidad }}">{{ u.nombre_unidad }}</option>
 					{% endfor %}
 				</select>
+				<input type="number" step="0.01" min="0" name="costo_unitario" placeholder="Costo unitario">
 				<input type="number" step="0.01" name="stock_actual" placeholder="Stock inicial (Sede Central)">
 				<input type="number" step="0.01" name="punto_minimo" placeholder="Punto minimo (alerta)">
 				<select name="estado">

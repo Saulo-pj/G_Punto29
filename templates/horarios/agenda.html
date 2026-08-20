@@ -1,0 +1,3514 @@
+{% extends 'base.html' %}
+{% block title %}Gestión de Personal y Horarios{% endblock %}
+{% block content %}
+<style>
+    body { background: var(--blanco-humo) !important; color: var(--negro-carbon) !important; }
+    body:not(.login-page) { background: linear-gradient(135deg, rgba(30, 30, 30, 0.52) 0%, rgba(45, 45, 45, 0.005) 100%), url('../static/img/fondo.png') center/cover no-repeat fixed !important; }
+    .app-shell { border: 1px solid rgba(45, 45, 45, 0.14) !important; background: linear-gradient(160deg, rgba(248, 245, 240, 0.95), rgba(230, 198, 130, 0.15)) !important; }
+    .sidebar { background: rgba(74, 74, 74, 0.96) !important; border-right: 1px solid rgba(230, 198, 130, 0.35) !important; color: var(--blanco-humo) !important; }
+    .sidebar .menu a, .sidebar .logout { background: rgba(248, 245, 240, 0.06) !important; border: 1px solid rgba(230, 198, 130, 0.35) !important; color: var(--blanco-humo) !important; }
+    .sidebar .menu a:hover, .sidebar .logout:hover { background: var(--dorado) !important; color: var(--gris-oscuro) !important; }
+    .content { margin-left: var(--sidebar-width) !important; padding: 14px !important; }
+    .topbar { display: flex !important; margin-bottom: 12px !important; height: auto !important; padding: 0 !important; }
+    .panel:has(.agenda-integrated) { padding: 8px 14px 20px; }
+    .agenda-integrated .app-container { display: block; min-height: 0; }
+    .agenda-integrated .main-content { min-height: 0; margin: 0; }
+    .agenda-integrated .content-wrapper { padding: 0 0 20px; max-width: none; }
+    .agenda-integrated { width: 100%; min-width: 0; overflow: visible; }
+    .agenda-integrated .main-content { width: 100%; max-width: 100%; overflow: visible; }
+    .agenda-integrated .content-wrapper { width: 100%; overflow: visible; }
+    .agenda-integrated .calendar-card { max-width: 100%; overflow: auto; }
+    .agenda-integrated .monthly-calendar { min-width: 920px; }
+    .agenda-integrated .filters-card { overflow: visible; }
+    .agenda-integrated .section-header { margin-bottom: 14px; }
+    .agenda-integrated .section-header h2 { font-size: 26px; }
+    .agenda-integrated .section-header p { font-size: 14px; }
+    .agenda-integrated .filters-card { width: 100%; padding: 16px; gap: 14px; }
+    .agenda-integrated .filter-group label { font-size: 13px; }
+    .agenda-integrated .calendar-card { width: 100%; }
+    .agenda-integrated .data-table { font-size: 13px; }
+    .agenda-integrated .page-section { width: 100%; min-height: calc(100vh - 180px); }
+    .agenda-integrated .calendar-card { min-height: 620px; }
+    .agenda-integrated .calendar-header { height: 86px; }
+    .agenda-integrated .calendar-title h2 { font-size: 22px; }
+    .agenda-integrated .calendar-nav { width: 42px; height: 42px; font-size: 18px; }
+    .agenda-integrated .today-button { padding: 8px 12px; font-size: 12px; }
+    .agenda-integrated .calendar-weekdays > div { padding: 14px; font-size: 12px; }
+    .agenda-integrated .calendar-day { min-height: 170px; padding: 14px; }
+    .agenda-integrated .day-number { width: 34px; height: 34px; font-size: 15px; }
+    .agenda-integrated .day-worker-count span { font-size: 12px; }
+    .agenda-integrated .day-worker-count i { font-size: 12px; }
+    .agenda-integrated .mini-stat { font-size: 11px; padding: 4px 7px; }
+    .agenda-integrated .day-event { padding: 6px 8px; font-size: 11px; }
+    .agenda-integrated .weekly-calendar { min-height: 500px; }
+    .agenda-integrated .weekly-calendar { width: 100%; max-width: 100%; max-height: calc(100vh - 270px); overflow-x: auto; overflow-y: auto; overscroll-behavior: contain; }
+    .agenda-integrated .weekly-calendar .week-table { width: max-content; max-width: none; }
+    .agenda-integrated .week-table { min-width: 1450px; }
+    .agenda-integrated .week-table-header,
+    .agenda-integrated .week-worker-row { grid-template-columns: 260px repeat(7, minmax(165px, 1fr)); }
+    .agenda-integrated .week-table-header > div { min-height: 76px; font-size: 13px; }
+    .agenda-integrated .week-table-header strong { font-size: 22px; }
+    .agenda-integrated .week-worker-row { min-height: 108px; }
+    .agenda-integrated .week-worker-name { padding: 16px; gap: 12px; }
+    .agenda-integrated .week-worker-avatar { width: 42px; height: 42px; font-size: 13px; }
+    .agenda-integrated .week-worker-name strong { font-size: 14px; }
+    .agenda-integrated .week-worker-name small { font-size: 12px; }
+    .agenda-integrated .week-day-cell { padding: 12px; gap: 8px; }
+    .agenda-integrated .week-shift { padding: 9px 10px; border-radius: 7px; font-size: 12px; }
+    .agenda-integrated .calendar-legend { padding: 16px; font-size: 13px; }
+    .agenda-integrated .stat-card { padding: 22px; }
+    .agenda-integrated .stat-information > span { font-size: 13px; }
+    .agenda-integrated .stat-information > strong { font-size: 30px; }
+    .agenda-integrated .mini-stat-card { padding: 18px; }
+    .agenda-integrated .modal-overlay { padding: 24px; }
+    .agenda-integrated .modal.large-modal { width: min(1180px, 96vw); max-width: 1180px; max-height: 92vh; }
+    .agenda-integrated .modal.large-modal .modal-header { padding: 26px 30px; }
+    .agenda-integrated .modal.large-modal .modal-header h2 { font-size: 24px; }
+    .agenda-integrated .modal.large-modal .modal-header p { font-size: 13px; }
+    .agenda-integrated .modal.large-modal .modal-body { padding: 28px 30px; max-height: calc(92vh - 150px); }
+    .agenda-integrated .modal.large-modal .profile-month-grid { gap: 8px; }
+    .agenda-integrated .modal.large-modal .profile-month-day { min-height: 82px; padding: 9px; font-size: 13px; }
+    .agenda-integrated .modal.large-modal .profile-month-day strong { font-size: 18px; }
+    .agenda-integrated .modal.profile-modal { width: min(1180px, 96vw); max-width: 1180px; max-height: 92vh; }
+    .agenda-integrated .modal.profile-modal .modal-header { padding: 26px 30px; }
+    .agenda-integrated .modal.profile-modal .modal-header h2 { font-size: 24px; }
+    .agenda-integrated .modal.profile-modal .modal-header p { font-size: 13px; }
+    .agenda-integrated .modal.profile-modal .modal-body { padding: 28px 30px; max-height: calc(92vh - 130px); }
+    .agenda-integrated .modal.profile-modal .profile-month-grid { gap: 8px; }
+    .agenda-integrated .modal.profile-modal .profile-month-day { min-height: 82px; padding: 9px; font-size: 13px; }
+    .agenda-integrated .modal.profile-modal .profile-month-day strong { font-size: 18px; }
+    .agenda-integrated .modal.profile-modal { width: min(1320px, 98vw); max-width: 1320px; max-height: 96vh; }
+    .agenda-integrated .modal.profile-modal .modal-body { max-height: calc(96vh - 120px); }
+    .agenda-integrated .modal.profile-modal .profile-month-grid { grid-template-columns: repeat(7, minmax(110px, 1fr)); gap: 10px; }
+    .agenda-integrated .modal.profile-modal .profile-month-day { min-height: 120px; font-size: 15px; padding: 12px; }
+    .agenda-integrated .modal.profile-modal .profile-month-day strong { font-size: 23px; }
+    .agenda-integrated .modal.profile-modal .profile-shift { font-size: 13px; }
+    .agenda-integrated .modal.profile-modal .profile-temporal-label { font-size: 11px; }
+    .agenda-integrated .quick-product-search { margin-bottom: 7px; }
+    .agenda-profile-overlay .profile-modal { width: min(1360px, 96vw) !important; max-width: 1360px !important; height: min(920px, 94vh); max-height: 94vh; }
+    .agenda-profile-overlay .profile-modal .modal-header { padding: 28px 34px; }
+    .agenda-profile-overlay .profile-modal .modal-header h2 { font-size: 28px; }
+    .agenda-profile-overlay .profile-modal .modal-header p { font-size: 14px; }
+    .agenda-profile-overlay .profile-modal .modal-body { padding: 30px 34px; max-height: none; flex: 1; overflow-y: auto; }
+    .agenda-profile-overlay .profile-modal .profile-summary { padding: 22px; gap: 20px; font-size: 16px; }
+    .agenda-profile-overlay .profile-modal .profile-grid { gap: 16px; margin-top: 22px; }
+    .agenda-profile-overlay .profile-modal .profile-grid span { font-size: 14px; padding: 12px; background: var(--gray-50); border-radius: 8px; }
+    .agenda-profile-overlay .profile-modal .profile-grid strong { font-size: 18px; }
+    .agenda-profile-overlay .profile-modal .profile-month { margin-top: 28px; }
+    .agenda-profile-overlay .profile-modal .profile-month-grid { grid-template-columns: repeat(7, minmax(130px, 1fr)); gap: 12px; }
+    .agenda-profile-overlay .profile-modal .profile-month-day { min-height: 145px; padding: 14px; font-size: 15px; border-radius: 9px; }
+    .agenda-profile-overlay .profile-modal .profile-month-day strong { font-size: 25px; }
+    .agenda-profile-overlay .profile-modal .profile-shift { font-size: 14px; }
+    .agenda-profile-overlay .profile-modal .profile-temporal-label { font-size: 12px; }
+    .agenda-profile-overlay .profile-modal .modal-body > button { margin-top: 18px; padding: 12px 18px; font-size: 14px; }
+    .agenda-integrated .checkbox-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 14px; padding: 12px; border: 1px solid var(--gray-200); border-radius: 8px; max-height: 180px; overflow-y: auto; background: var(--gray-50); }
+    .agenda-integrated .checkbox-list label { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--gray-700); }
+    .agenda-integrated .checkbox-list input { width: auto; accent-color: var(--primary); }
+    .agenda-integrated .worker-template-modal { width: min(900px, 94vw); max-width: 900px; max-height: 84vh; }
+    .agenda-integrated .worker-template-modal dl { display: grid; grid-template-columns: 150px 1fr; gap: 10px 18px; margin-top: 18px; }
+    .agenda-integrated .worker-template-modal dt { font-weight: 700; color: var(--gray-700); }
+    .agenda-integrated .worker-template-modal dd { margin: 0; color: var(--gray-600); line-height: 1.5; }
+    .agenda-integrated.agenda-restricted #filterSede,
+    .agenda-integrated.agenda-restricted #filterArea,
+    .agenda-integrated.agenda-restricted #filterTurno { display: none; }
+    .agenda-integrated.agenda-restricted .filter-group:has(#filterSede),
+    .agenda-integrated.agenda-restricted .filter-group:has(#filterArea),
+    .agenda-integrated.agenda-restricted .filter-group:has(#filterTurno) { display: none; }
+    .agenda-integrated .agenda-side-nav { position: fixed; top: 96px; right: 0; left: auto; width: 230px; height: auto; max-height: calc(100vh - 116px); padding: 14px 10px; background: #fff !important; color: #334155 !important; border: 1px solid #e2e8f0 !important; border-right: 0 !important; border-radius: 14px 0 0 14px; box-shadow: 0 12px 30px rgba(15, 23, 42, 0.15); transform: translateX(100%); transition: transform 0.25s ease; overflow-y: auto; z-index: 900; }
+    .agenda-integrated .agenda-side-nav.is-open { transform: translateX(0); }
+    .agenda-integrated .agenda-side-nav .sidebar-header { height: auto; padding: 8px 10px 14px; border-bottom: 1px solid #e2e8f0; }
+    .agenda-integrated .agenda-side-nav .logo { width: 34px; height: 34px; background: #eff6ff; color: #2563eb; }
+    .agenda-integrated .agenda-side-nav .logo-text h2 { font-size: 15px; color: #0f172a; }
+    .agenda-integrated .agenda-side-nav .logo-text span { color: #64748b; }
+    .agenda-integrated .agenda-side-nav .menu-item { color: #475569; }
+    .agenda-integrated .agenda-side-nav .menu-item:hover { background: #f1f5f9; color: #0f172a; }
+    .agenda-integrated .agenda-side-nav .menu-item.active { background: #eff6ff; color: #2563eb; }
+    .agenda-integrated .agenda-side-nav .menu-title { color: #94a3b8; }
+    .agenda-integrated .agenda-nav-toggle { position: fixed; top: 150px; right: 0; width: 34px; height: 58px; border: 1px solid #e2e8f0; border-right: 0; border-radius: 12px 0 0 12px; background: #fff; color: #2563eb; box-shadow: 0 6px 18px rgba(15, 23, 42, 0.14); cursor: pointer; z-index: 901; font-size: 20px; transition: right 0.25s ease; }
+    .agenda-integrated .agenda-nav-toggle.is-open { right: 230px; }
+    .agenda-integrated .agenda-nav-toggle .arrow-open { display: none; }
+    .agenda-integrated .agenda-nav-toggle.is-open .arrow-closed { display: none; }
+    .agenda-integrated .agenda-nav-toggle.is-open .arrow-open { display: inline; }
+    .agenda-integrated #section-sedes,
+    .agenda-integrated #section-turnos { display: none !important; }
+    @media (max-width: 900px) {
+        .sidebar.is-open { transform: translateX(0) !important; }
+        .content { margin-left: 0 !important; padding: 56px 8px 8px !important; }
+        .topbar { padding: 0 !important; }
+        .panel:has(.agenda-integrated) { padding: 10px; }
+        .agenda-integrated .section-header h2 { font-size: 22px; }
+        .agenda-integrated .filters-card { padding: 12px; }
+        .agenda-integrated .monthly-calendar { min-width: 760px; }
+        .agenda-integrated .modal.large-modal { width: 98vw; max-height: 94vh; }
+        .agenda-integrated .modal.large-modal .modal-body { padding: 18px; max-height: calc(94vh - 130px); }
+        .agenda-integrated .modal.profile-modal { width: 98vw; max-height: 94vh; }
+        .agenda-integrated .modal.profile-modal .modal-body { padding: 18px; max-height: calc(94vh - 120px); }
+        .agenda-integrated .modal.profile-modal .profile-month-grid { grid-template-columns: repeat(7, minmax(82px, 1fr)); overflow-x: auto; }
+        .agenda-integrated .modal.profile-modal .profile-month-day { min-height: 100px; }
+        .agenda-profile-overlay { padding: 8px !important; }
+        .agenda-profile-overlay .profile-modal { width: 100% !important; height: 96vh; max-height: 96vh; }
+        .agenda-profile-overlay .profile-modal .modal-header { padding: 18px; }
+        .agenda-profile-overlay .profile-modal .modal-header h2 { font-size: 21px; }
+        .agenda-profile-overlay .profile-modal .modal-body { padding: 18px; }
+        .agenda-profile-overlay .profile-modal .profile-month-grid { grid-template-columns: repeat(7, minmax(96px, 1fr)); gap: 8px; overflow-x: auto; }
+        .agenda-profile-overlay .profile-modal .profile-month-day { min-height: 115px; padding: 10px; }
+        .agenda-integrated .checkbox-list { grid-template-columns: 1fr; }
+        .agenda-integrated .worker-template-modal dl { grid-template-columns: 1fr; gap: 4px; }
+        .agenda-integrated .week-table { min-width: 1180px; }
+        .agenda-integrated .week-table-header,
+        .agenda-integrated .week-worker-row { grid-template-columns: 210px repeat(7, minmax(138px, 1fr)); }
+    }
+</style>
+
+<!-- CSS PRINCIPAL -->
+    <link rel="stylesheet" href="{{ url_for('horarios_asset', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('horarios_asset', filename='css/calendario.css') }}">
+    <link rel="stylesheet" href="{{ url_for('horarios_asset', filename='css/responsive.css') }}">
+
+    <!-- ICONOS -->
+    <link
+        rel="stylesheet"
+        href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"
+    >
+    <script src="{{ url_for('horarios_asset', filename='data/datos.js') }}"></script>
+
+<script src="{{ url_for('horarios_asset', filename='js/storage.js') }}"></script>
+
+<script src="{{ url_for('horarios_asset', filename='js/trabajadores.js') }}"></script>
+
+<script src="{{ url_for('horarios_asset', filename='js/permisos.js') }}"></script>
+
+<script src="{{ url_for('horarios_asset', filename='js/asistencia.js') }}"></script>
+
+<script src="{{ url_for('horarios_asset', filename='js/horarios.js') }}"></script>
+
+<script src="{{ url_for('horarios_asset', filename='js/calendario.js') }}"></script>
+
+<script src="{{ url_for('horarios_asset', filename='js/reportes.js') }}"></script>
+
+    <script src="{{ url_for('horarios_asset', filename='js/app.js') }}"></script>
+
+<div class="agenda-integrated">
+<script>
+    window.AGENDA_SCOPE = {
+        role: {{ agenda_role|tojson }},
+        sedeId: {{ agenda_sede_id|tojson }},
+        turnoId: {{ agenda_turno_id|tojson }}
+    };
+</script>
+
+<!-- =========================================================
+     CONTENEDOR PRINCIPAL
+========================================================= -->
+
+<div class="app-container">
+
+    <!-- =====================================================
+         SIDEBAR
+    ====================================================== -->
+
+    <button class="agenda-nav-toggle" id="agendaNavToggle" type="button" title="Mostrar menú de Agenda" aria-label="Mostrar menú de Agenda"><span class="arrow-closed">◀</span><span class="arrow-open">▶</span></button>
+
+    <aside class="sidebar agenda-side-nav" id="sidebar">
+
+        <!-- LOGO -->
+        <div class="sidebar-header">
+
+            <div class="logo">
+                <i class="fa-solid fa-calendar-days"></i>
+            </div>
+
+            <div class="logo-text">
+                <h2>HorarioPro</h2>
+                <span>Organizador de personal</span>
+            </div>
+
+        </div>
+
+
+        <!-- MENU -->
+        <nav class="sidebar-menu">
+
+            <p class="menu-title">
+                PRINCIPAL
+            </p>
+
+            <button
+                class="menu-item active"
+                data-section="dashboard"
+            >
+                <i class="fa-solid fa-chart-line"></i>
+                <span>Dashboard</span>
+            </button>
+
+
+            <button
+                class="menu-item"
+                data-section="agenda"
+            >
+                <i class="fa-solid fa-calendar-days"></i>
+                <span>Agenda</span>
+            </button>
+
+
+            <button
+                class="menu-item"
+                data-section="trabajadores"
+            >
+                <i class="fa-solid fa-users"></i>
+                <span>Trabajadores</span>
+            </button>
+
+            <button
+                class="menu-item"
+                data-section="asistencia"
+            >
+                <i class="fa-solid fa-clipboard-check"></i>
+                <span>Asistencia</span>
+            </button>
+
+
+            <p class="menu-title">
+                CONFIGURACIÓN
+            </p>
+
+
+            <button
+                class="menu-item"
+                data-section="cargos"
+            >
+                <i class="fa-solid fa-briefcase"></i>
+                <span>Cargos y áreas</span>
+            </button>
+
+
+            <p class="menu-title">
+                REPORTES
+            </p>
+
+
+            <button
+                class="menu-item"
+                data-section="reportes"
+            >
+                <i class="fa-solid fa-file-lines"></i>
+                <span>Reportes</span>
+            </button>
+
+        </nav>
+
+
+        <!-- SIDEBAR FOOTER -->
+
+        <div class="sidebar-footer">
+
+            <div class="system-status">
+
+                <span class="status-dot"></span>
+
+                <div>
+                    <strong>Sistema activo</strong>
+                    <small>LocalStorage</small>
+                </div>
+
+            </div>
+
+        </div>
+
+    </aside>
+
+
+    <!-- =====================================================
+         CONTENIDO PRINCIPAL
+    ====================================================== -->
+
+    <main class="main-content">
+
+
+        <!-- =================================================
+             TOPBAR
+        ================================================== -->
+
+        {% if false %}<header class="topbar">
+
+            <div class="topbar-left">
+
+                <button
+                    class="mobile-menu-button"
+                    id="mobileMenuButton"
+                >
+                    <i class="fa-solid fa-bars"></i>
+                </button>
+
+
+                <div class="page-title">
+
+                    <h1 id="pageTitle">
+                        Dashboard
+                    </h1>
+
+                    <p id="pageDescription">
+                        Resumen del personal y horarios
+                    </p>
+
+                </div>
+
+            </div>
+
+
+            <div class="topbar-right">
+
+                <!-- NOTIFICACIONES -->
+
+                <button
+                    class="icon-button notification-button"
+                    title="Notificaciones"
+                >
+                    <i class="fa-regular fa-bell"></i>
+                    <span class="notification-count">3</span>
+                </button>
+
+
+                <!-- USUARIO -->
+
+                <div class="user-profile">
+
+                    <div class="user-avatar">
+                        AD
+                    </div>
+
+                    <div class="user-info">
+                        <strong>Administrador</strong>
+                        <small>Administrador</small>
+                    </div>
+
+                    <i class="fa-solid fa-chevron-down"></i>
+
+                </div>
+
+            </div>
+
+        </header>{% endif %}
+
+
+        <!-- =================================================
+             CONTENIDO / SECCIONES
+        ================================================== -->
+
+        <div class="content-wrapper">
+
+
+            <!-- =================================================
+                 DASHBOARD
+            ================================================== -->
+
+            <section
+                id="section-dashboard"
+                class="page-section active"
+            >
+
+                <!-- ENCABEZADO -->
+
+                <div class="section-header">
+
+                    <div>
+
+                        <h2>
+                            Resumen general
+                        </h2>
+
+                        <p>
+                            Estado del personal y planificación actual
+                        </p>
+
+                    </div>
+
+
+                    <div class="section-actions">
+
+                        <button
+                            class="btn btn-primary"
+                            id="btnNewWorker"
+                        >
+                            <i class="fa-solid fa-user-plus"></i>
+                            Nuevo trabajador
+                        </button>
+
+                    </div>
+
+                </div>
+
+
+                <!-- TARJETAS -->
+
+                <div class="stats-grid">
+
+
+                    <!-- TRABAJADORES -->
+
+                    <div class="stat-card">
+
+                        <div class="stat-icon blue">
+                            <i class="fa-solid fa-users"></i>
+                        </div>
+
+                        <div class="stat-information">
+
+                            <span>
+                                Trabajadores activos
+                            </span>
+
+                            <strong id="statWorkers">
+                                35
+                            </strong>
+
+                            <small class="positive">
+                                <i class="fa-solid fa-arrow-up"></i>
+                                Personal registrado
+                            </small>
+
+                        </div>
+
+                    </div>
+
+
+                    <!-- TURNO DÍA -->
+
+                    <div class="stat-card">
+
+                        <div class="stat-icon orange">
+                            <i class="fa-solid fa-sun"></i>
+                        </div>
+
+                        <div class="stat-information">
+
+                            <span>
+                                Turno día
+                            </span>
+
+                            <strong id="statDay">
+                                20
+                            </strong>
+
+                            <small>
+                                Trabajadores programados
+                            </small>
+
+                        </div>
+
+                    </div>
+
+
+                    <!-- TURNO NOCHE -->
+
+                    <div class="stat-card">
+
+                        <div class="stat-icon purple">
+                            <i class="fa-solid fa-moon"></i>
+                        </div>
+
+                        <div class="stat-information">
+
+                            <span>
+                                Turno noche
+                            </span>
+
+                            <strong id="statNight">
+                                15
+                            </strong>
+
+                            <small>
+                                Trabajadores programados
+                            </small>
+
+                        </div>
+
+                    </div>
+
+
+                    <!-- DOBLETES -->
+
+                    <div class="stat-card">
+
+                        <div class="stat-icon red">
+                            <i class="fa-solid fa-repeat"></i>
+                        </div>
+
+                        <div class="stat-information">
+
+                            <span>
+                                Dobletes
+                            </span>
+
+                            <strong id="statDouble">
+                                4
+                            </strong>
+
+                            <small>
+                                Programados
+                            </small>
+
+                        </div>
+
+                    </div>
+
+                </div>
+
+
+                <!-- SEGUNDA FILA -->
+
+                <div class="stats-grid secondary-stats">
+
+
+                    <!-- DESCANSOS -->
+
+                    <div class="mini-stat-card">
+
+                        <div class="mini-stat-icon gray">
+                            <i class="fa-solid fa-bed"></i>
+                        </div>
+
+                        <div>
+
+                            <span>
+                                Descansos hoy
+                            </span>
+
+                            <strong id="statRest">
+                                7
+                            </strong>
+
+                        </div>
+
+                    </div>
+
+
+                    <!-- PERMISOS -->
+
+                    <div class="mini-stat-card">
+
+                        <div class="mini-stat-icon yellow">
+                            <i class="fa-solid fa-file-circle-exclamation"></i>
+                        </div>
+
+                        <div>
+
+                            <span>
+                                Permisos
+                            </span>
+
+                            <strong id="statPermission">
+                                2
+                            </strong>
+
+                        </div>
+
+                    </div>
+
+
+                    <!-- FALTAS -->
+
+                    <div class="mini-stat-card">
+
+                        <div class="mini-stat-icon red">
+                            <i class="fa-solid fa-user-xmark"></i>
+                        </div>
+
+                        <div>
+
+                            <span>
+                                Faltas
+                            </span>
+
+                            <strong id="statAbsence">
+                                1
+                            </strong>
+
+                        </div>
+
+                    </div>
+
+
+                    <!-- VACACIONES -->
+
+                    <div class="mini-stat-card">
+
+                        <div class="mini-stat-icon green">
+                            <i class="fa-solid fa-umbrella-beach"></i>
+                        </div>
+
+                        <div>
+
+                            <span>
+                                Vacaciones
+                            </span>
+
+                            <strong id="statVacation">
+                                3
+                            </strong>
+
+                        </div>
+
+                    </div>
+
+                </div>
+
+
+                <!-- DASHBOARD INFERIOR -->
+
+                <div class="dashboard-grid">
+
+
+                    <!-- PERSONAL POR SEDE -->
+
+                    <div class="dashboard-card">
+
+                        <div class="card-header">
+
+                            <div>
+
+                                <h3>
+                                    Personal por sede
+                                </h3>
+
+                                <span>
+                                    Distribución actual
+                                </span>
+
+                            </div>
+
+                            <button class="more-button">
+                                <i class="fa-solid fa-ellipsis"></i>
+                            </button>
+
+                        </div>
+
+
+                        <div class="location-list">
+
+
+                            <div class="location-item">
+
+                                <div class="location-information">
+
+                                    <div class="location-icon">
+                                        <i class="fa-solid fa-building"></i>
+                                    </div>
+
+                                    <div>
+
+                                        <strong>
+                                            Sede 20
+                                        </strong>
+
+                                        <span>
+                                            23 trabajadores
+                                        </span>
+
+                                    </div>
+
+                                </div>
+
+                                <strong>
+                                    66%
+                                </strong>
+
+                            </div>
+
+
+                            <div class="progress-bar">
+
+                                <div
+                                    class="progress blue-progress"
+                                    style="width:66%"
+                                ></div>
+
+                            </div>
+
+
+                            <div class="location-item">
+
+                                <div class="location-information">
+
+                                    <div class="location-icon">
+                                        <i class="fa-solid fa-building"></i>
+                                    </div>
+
+                                    <div>
+
+                                        <strong>
+                                            Sede 17
+                                        </strong>
+
+                                        <span>
+                                            12 trabajadores
+                                        </span>
+
+                                    </div>
+
+                                </div>
+
+                                <strong>
+                                    34%
+                                </strong>
+
+                            </div>
+
+
+                            <div class="progress-bar">
+
+                                <div
+                                    class="progress orange-progress"
+                                    style="width:34%"
+                                ></div>
+
+                            </div>
+
+                        </div>
+
+                    </div>
+
+
+                    <!-- ACTIVIDAD -->
+
+                    <div class="dashboard-card">
+
+                        <div class="card-header">
+
+                            <div>
+
+                                <h3>
+                                    Actividad reciente
+                                </h3>
+
+                                <span>
+                                    Últimos cambios
+                                </span>
+
+                            </div>
+
+                        </div>
+
+
+                        <div class="activity-list">
+
+
+                            <div class="activity-item">
+
+                                <div class="activity-icon blue">
+                                    <i class="fa-solid fa-user-plus"></i>
+                                </div>
+
+                                <div>
+
+                                    <strong>
+                                        Nuevo trabajador
+                                    </strong>
+
+                                    <span>
+                                        Se registró Carlos López
+                                    </span>
+
+                                    <small>
+                                        Hace 10 minutos
+                                    </small>
+
+                                </div>
+
+                            </div>
+
+
+                            <div class="activity-item">
+
+                                <div class="activity-icon orange">
+                                    <i class="fa-solid fa-right-left"></i>
+                                </div>
+
+                                <div>
+
+                                    <strong>
+                                        Cambio de sede
+                                    </strong>
+
+                                    <span>
+                                        Ana Torres → Sede 17
+                                    </span>
+
+                                    <small>
+                                        Hace 35 minutos
+                                    </small>
+
+                                </div>
+
+                            </div>
+
+
+                            <div class="activity-item">
+
+                                <div class="activity-icon purple">
+                                    <i class="fa-solid fa-repeat"></i>
+                                </div>
+
+                                <div>
+
+                                    <strong>
+                                        Nuevo doblete
+                                    </strong>
+
+                                    <span>
+                                        Juan Pérez — Día + Noche
+                                    </span>
+
+                                    <small>
+                                        Hace 1 hora
+                                    </small>
+
+                                </div>
+
+                            </div>
+
+
+                        </div>
+
+                    </div>
+
+                </div>
+
+
+                <!-- AGENDA RÁPIDA -->
+
+                <div class="dashboard-card">
+
+                    <div class="card-header">
+
+                        <div>
+
+                            <h3>
+                                Próximos días
+                            </h3>
+
+                            <span>
+                                Resumen de personal
+                            </span>
+
+                        </div>
+
+
+                        <button
+                            class="btn btn-secondary"
+                            data-section-button="agenda"
+                        >
+                            Ver agenda
+                        </button>
+
+                    </div>
+
+
+                    <div class="quick-calendar">
+
+                        <div class="quick-day">
+
+                            <span>
+                                LUN
+                            </span>
+
+                            <strong>
+                                17
+                            </strong>
+
+                            <small>
+                                24 trabajadores
+                            </small>
+
+                        </div>
+
+
+                        <div class="quick-day">
+
+                            <span>
+                                MAR
+                            </span>
+
+                            <strong>
+                                18
+                            </strong>
+
+                            <small>
+                                26 trabajadores
+                            </small>
+
+                        </div>
+
+
+                        <div class="quick-day active">
+
+                            <span>
+                                MIÉ
+                            </span>
+
+                            <strong>
+                                19
+                            </strong>
+
+                            <small>
+                                25 trabajadores
+                            </small>
+
+                        </div>
+
+
+                        <div class="quick-day">
+
+                            <span>
+                                JUE
+                            </span>
+
+                            <strong>
+                                20
+                            </strong>
+
+                            <small>
+                                27 trabajadores
+                            </small>
+
+                        </div>
+
+
+                        <div class="quick-day">
+
+                            <span>
+                                VIE
+                            </span>
+
+                            <strong>
+                                21
+                            </strong>
+
+                            <small>
+                                26 trabajadores
+                            </small>
+
+                        </div>
+
+                    </div>
+
+                </div>
+
+            </section>
+
+
+            <!-- =================================================
+                 AGENDA
+            ================================================== -->
+
+            <section
+                id="section-agenda"
+                class="page-section"
+            >
+
+                <div class="section-header">
+
+                    <div>
+
+                        <h2>
+                            Agenda de horarios
+                        </h2>
+
+                        <p>
+                            Organiza los turnos, descansos, permisos y dobletes
+                        </p>
+
+                    </div>
+
+
+                    <div class="section-actions">
+
+                        <button
+                            class="btn btn-secondary active"
+                            id="btnMonthView"
+                        >
+                            <i class="fa-solid fa-calendar"></i>
+                            Mensual
+                        </button>
+
+                        <button
+                            class="btn btn-secondary"
+                            id="btnWeekView"
+                        >
+                            <i class="fa-solid fa-table-columns"></i>
+                            Semanal
+                        </button>
+
+                    </div>
+
+                </div>
+
+
+                <!-- FILTROS -->
+
+                <div class="filters-card">
+
+                    <div class="filter-group">
+                        <label>Sede obligatoria</label>
+                        <select id="agendaSedeFilter" required></select>
+                    </div>
+
+                    <div class="filter-group agenda-shift-filter">
+                        <label>Turno obligatorio</label>
+                        <div class="shift-switch" role="group" aria-label="Turno de agenda">
+                            <button type="button" class="shift-switch-button active" data-agenda-turno="day" title="Turno día"><i class="fa-solid fa-sun"></i></button>
+                            <button type="button" class="shift-switch-button" data-agenda-turno="night" title="Turno noche"><i class="fa-solid fa-moon"></i></button>
+                        </div>
+                    </div>
+
+                    <div class="filter-group">
+
+                        <label>
+                            Sede
+                        </label>
+
+                        <select id="filterSede">
+
+                            <option value="all">
+                                Todas las sedes
+                            </option>
+
+                            <option value="sede20">
+                                Sede 20
+                            </option>
+
+                            <option value="sede17">
+                                Sede 17
+                            </option>
+
+                        </select>
+
+                    </div>
+
+
+                    <div class="filter-group">
+
+                        <label>
+                            Área
+                        </label>
+
+                        <select id="filterArea">
+
+                            <option value="all">
+                                Todas las áreas
+                            </option>
+
+                        </select>
+
+                    </div>
+
+
+                    <div class="filter-group">
+
+                        <label>
+                            Turno
+                        </label>
+
+                        <select id="filterTurno">
+
+                            <option value="all">
+                                Todos
+                            </option>
+
+                            <option value="day">
+                                Día
+                            </option>
+
+                            <option value="night">
+                                Noche
+                            </option>
+
+                        </select>
+
+                    </div>
+
+
+                    <div class="filter-group search-filter">
+
+                        <label>
+                            Buscar
+                        </label>
+
+                        <div class="search-box">
+
+                            <i class="fa-solid fa-magnifying-glass"></i>
+
+                            <input
+                                type="text"
+                                id="searchWorker"
+                                placeholder="Buscar trabajador..."
+                            >
+
+                        </div>
+
+                    </div>
+
+                </div>
+
+
+                <!-- CALENDARIO -->
+
+                <div class="calendar-card">
+
+
+                    <!-- CABECERA CALENDARIO -->
+
+                    <div class="calendar-header">
+
+                        <button
+                            class="calendar-nav"
+                            id="prevPeriod"
+                        >
+                            <i class="fa-solid fa-chevron-left"></i>
+                        </button>
+
+
+                        <div class="calendar-title">
+
+                            <h2 id="calendarMonth">
+                                Agosto 2026
+                            </h2>
+
+                            <button
+                                class="today-button"
+                                id="btnToday"
+                            >
+                                Hoy
+                            </button>
+
+                        </div>
+
+
+                        <button
+                            class="calendar-nav"
+                            id="nextPeriod"
+                        >
+                            <i class="fa-solid fa-chevron-right"></i>
+                        </button>
+
+                    </div>
+
+
+                    <!-- VISTA MENSUAL -->
+
+                    <div
+                        id="monthlyCalendar"
+                        class="monthly-calendar"
+                    >
+
+                        <div class="calendar-weekdays">
+
+                            <div>
+                                LUN
+                            </div>
+
+                            <div>
+                                MAR
+                            </div>
+
+                            <div>
+                                MIÉ
+                            </div>
+
+                            <div>
+                                JUE
+                            </div>
+
+                            <div>
+                                VIE
+                            </div>
+
+                            <div>
+                                SÁB
+                            </div>
+
+                            <div>
+                                DOM
+                            </div>
+
+                        </div>
+
+
+                        <div
+                            class="calendar-grid"
+                            id="calendarGrid"
+                        >
+
+                            <!-- JAVASCRIPT GENERARÁ LOS DÍAS -->
+
+                        </div>
+
+                    </div>
+
+
+                    <!-- VISTA SEMANAL -->
+
+                    <div
+                        id="weeklyCalendar"
+                        class="weekly-calendar hidden"
+                    >
+
+                        <div class="week-table">
+
+                            <div class="week-table-header">
+
+                                <div class="worker-column">
+                                    TRABAJADOR
+                                </div>
+
+                                <div>
+                                    LUN
+                                    <strong>17</strong>
+                                </div>
+
+                                <div>
+                                    MAR
+                                    <strong>18</strong>
+                                </div>
+
+                                <div class="current-day">
+                                    MIÉ
+                                    <strong>19</strong>
+                                </div>
+
+                                <div>
+                                    JUE
+                                    <strong>20</strong>
+                                </div>
+
+                                <div>
+                                    VIE
+                                    <strong>21</strong>
+                                </div>
+
+                                <div>
+                                    SÁB
+                                    <strong>22</strong>
+                                </div>
+
+                                <div>
+                                    DOM
+                                    <strong>23</strong>
+                                </div>
+
+                            </div>
+
+
+                            <div
+                                class="week-table-body"
+                                id="weeklyCalendarBody"
+                            >
+
+                                <!-- JAVASCRIPT -->
+
+                            </div>
+
+                        </div>
+
+                    </div>
+
+
+                    <!-- LEYENDA -->
+
+                    <div class="calendar-legend">
+
+                        <span>
+                            <i class="legend-dot work"></i>
+                            Trabajo
+                        </span>
+
+                        <span>
+                            <i class="legend-dot rest"></i>
+                            Descanso
+                        </span>
+
+                        <span>
+                            <i class="legend-dot permission"></i>
+                            Permiso
+                        </span>
+
+                        <span>
+                            <i class="legend-dot absence"></i>
+                            Falta
+                        </span>
+
+                        <span>
+                            <i class="legend-dot vacation"></i>
+                            Vacaciones
+                        </span>
+
+                        <span>
+                            <i class="legend-dot double"></i>
+                            Doblete
+                        </span>
+
+                        <span>
+                            <i class="legend-dot support"></i>
+                            Apoyo
+                        </span>
+
+                    </div>
+
+                </div>
+
+            </section>
+
+
+            <!-- =================================================
+                 TRABAJADORES
+            ================================================== -->
+
+            <section
+                id="section-trabajadores"
+                class="page-section"
+            >
+
+                <div class="section-header">
+
+                    <div>
+
+                        <h2>
+                            Trabajadores
+                        </h2>
+
+                        <p>
+                            Gestiona la información y asignación del personal
+                        </p>
+
+                    </div>
+
+
+                    <button
+                        class="btn btn-primary"
+                        id="btnAddWorker"
+                    >
+                        <i class="fa-solid fa-user-plus"></i>
+                        Agregar trabajador
+                    </button>
+                    <button class="btn btn-secondary" type="button" id="btnWorkerTemplate" title="Descargar molde Excel"><i class="fa-solid fa-table-list"></i> Molde</button>
+                    <button class="btn btn-secondary" type="button" id="btnImportWorkers" title="Importar trabajadores desde Excel"><i class="fa-solid fa-file-arrow-up"></i> Importar</button>
+                    <input type="file" id="workerImportFile" accept=".xlsx,.xls" hidden>
+                    <button class="btn btn-secondary" type="button" id="btnExportWorkers" title="Exportar trabajadores para Excel"><i class="fa-solid fa-file-excel"></i> Exportar Excel</button>
+
+                </div>
+
+
+                <!-- FILTROS -->
+
+                <div class="filters-card">
+
+                    <div class="filter-group search-filter">
+
+                        <label>
+                            Buscar trabajador
+                        </label>
+
+                        <div class="search-box">
+
+                            <i class="fa-solid fa-magnifying-glass"></i>
+
+                            <input
+                                type="text"
+                                id="workerSearch"
+                                placeholder="Nombre, DNI..."
+                            >
+
+                        </div>
+
+                    </div>
+
+
+                    <div class="filter-group">
+
+                        <label>
+                            Sede
+                        </label>
+
+                        <select id="workerFilterSede">
+
+                            <option value="all">
+                                Todas
+                            </option>
+
+                            <option value="2">
+                                Sede 20
+                            </option>
+
+                            <option value="1">
+                                Sede 17
+                            </option>
+
+                        </select>
+
+                    </div>
+
+
+                    <div class="filter-group">
+
+                        <label>
+                            Estado
+                        </label>
+
+                        <select id="workerFilterStatus">
+
+                            <option value="all" selected>
+                                Todos
+                            </option>
+
+                            <option value="activo">
+                                Activos
+                            </option>
+
+                            <option value="inactivo">
+                                Inactivos
+                            </option>
+
+                        </select>
+
+                    </div>
+
+                </div>
+
+
+                <!-- TABLA -->
+
+                <div class="table-card">
+
+                    <div class="table-responsive">
+
+                        <table class="data-table">
+
+                            <thead>
+
+                                <tr>
+
+                                    <th>
+                                        Trabajador
+                                    </th>
+
+                                    <th>
+                                        DNI
+                                    </th>
+
+                                    <th>
+                                        Cargo
+                                    </th>
+
+                                    <th>
+                                        Área
+                                    </th>
+
+                                    <th>
+                                        Sede actual
+                                    </th>
+
+                                    <th>
+                                        Turno
+                                    </th>
+
+                                    <th>
+                                        Descanso
+                                    </th>
+
+                                    <th>
+                                        Estado
+                                    </th>
+
+                                    <th>
+                                        Acciones
+                                    </th>
+
+                                </tr>
+
+                            </thead>
+
+
+                            <tbody id="workersTableBody">
+
+                                <!-- JS -->
+
+                            </tbody>
+
+                        </table>
+
+                    </div>
+
+                </div>
+
+            </section>
+
+
+            <!-- =================================================
+                 SEDES
+            ================================================== -->
+
+            <section
+                id="section-sedes"
+                class="page-section"
+            >
+
+                <div class="section-header">
+
+                    <div>
+
+                        <h2>
+                            Sedes
+                        </h2>
+
+                        <p>
+                            Administra las sedes disponibles
+                        </p>
+
+                    </div>
+
+
+                    <button
+                        class="btn btn-primary"
+                        id="btnAddLocation"
+                    >
+                        <i class="fa-solid fa-plus"></i>
+                        Agregar sede
+                    </button>
+
+                </div>
+
+
+                <div
+                    class="cards-grid"
+                    id="locationsContainer"
+                >
+
+                    <div class="management-card">
+
+                        <div class="management-card-header">
+
+                            <div class="management-icon building">
+                                <i class="fa-solid fa-building"></i>
+                            </div>
+
+                            <div class="management-actions">
+
+                                <button
+                                    class="icon-button small"
+                                    title="Editar"
+                                >
+                                    <i class="fa-solid fa-pen"></i>
+                                </button>
+
+                            </div>
+
+                        </div>
+
+
+                        <h3>
+                            Sede 20
+                        </h3>
+
+                        <p>
+                            Sede principal
+                        </p>
+
+
+                        <div class="management-info">
+
+                            <span>
+                                <i class="fa-solid fa-users"></i>
+                                23 trabajadores
+                            </span>
+
+                            <span>
+                                <i class="fa-solid fa-table"></i>
+                                54 mesas
+                            </span>
+
+                        </div>
+
+
+                        <span class="status-badge active">
+                            Activa
+                        </span>
+
+                    </div>
+
+
+                    <div class="management-card">
+
+                        <div class="management-card-header">
+
+                            <div class="management-icon building">
+                                <i class="fa-solid fa-building"></i>
+                            </div>
+
+                            <div class="management-actions">
+
+                                <button
+                                    class="icon-button small"
+                                    title="Editar"
+                                >
+                                    <i class="fa-solid fa-pen"></i>
+                                </button>
+
+                            </div>
+
+                        </div>
+
+
+                        <h3>
+                            Sede 17
+                        </h3>
+
+                        <p>
+                            Sede secundaria
+                        </p>
+
+
+                        <div class="management-info">
+
+                            <span>
+                                <i class="fa-solid fa-users"></i>
+                                12 trabajadores
+                            </span>
+
+                            <span>
+                                <i class="fa-solid fa-table"></i>
+                                14 mesas
+                            </span>
+
+                        </div>
+
+
+                        <span class="status-badge active">
+                            Activa
+                        </span>
+
+                    </div>
+
+
+                    <div class="management-card add-card">
+
+                        <button id="btnAddLocationCard">
+
+                            <i class="fa-solid fa-plus"></i>
+
+                            <span>
+                                Agregar nueva sede
+                            </span>
+
+                        </button>
+
+                    </div>
+
+                </div>
+
+            </section>
+
+
+            <!-- =================================================
+                 TURNOS
+            ================================================== -->
+
+            <section
+                id="section-turnos"
+                class="page-section"
+            >
+
+                <div class="section-header">
+
+                    <div>
+
+                        <h2>
+                            Turnos
+                        </h2>
+
+                        <p>
+                            Configura los horarios de trabajo
+                        </p>
+
+                    </div>
+
+
+                    <button
+                        class="btn btn-primary"
+                        id="btnAddShift"
+                    >
+                        <i class="fa-solid fa-plus"></i>
+                        Agregar turno
+                    </button>
+
+                </div>
+
+
+                <div
+                    class="cards-grid"
+                    id="shiftsContainer"
+                >
+
+                    <div class="management-card shift-card">
+
+                        <div class="management-card-header">
+
+                            <div class="management-icon sun">
+                                <i class="fa-solid fa-sun"></i>
+                            </div>
+
+                            <div class="management-actions">
+
+                                <button class="icon-button small">
+                                    <i class="fa-solid fa-pen"></i>
+                                </button>
+
+                            </div>
+
+                        </div>
+
+
+                        <h3>
+                            Turno Día
+                        </h3>
+
+                        <div class="shift-time">
+
+                            <strong>
+                                12:00 PM
+                            </strong>
+
+                            <i class="fa-solid fa-arrow-right"></i>
+
+                            <strong>
+                                05:30 PM
+                            </strong>
+
+                        </div>
+
+
+                        <span class="status-badge active">
+                            Activo
+                        </span>
+
+                    </div>
+
+
+                    <div class="management-card shift-card">
+
+                        <div class="management-card-header">
+
+                            <div class="management-icon moon">
+                                <i class="fa-solid fa-moon"></i>
+                            </div>
+
+                            <div class="management-actions">
+
+                                <button class="icon-button small">
+                                    <i class="fa-solid fa-pen"></i>
+                                </button>
+
+                            </div>
+
+                        </div>
+
+
+                        <h3>
+                            Turno Noche
+                        </h3>
+
+                        <div class="shift-time">
+
+                            <strong>
+                                06:30 PM
+                            </strong>
+
+                            <i class="fa-solid fa-arrow-right"></i>
+
+                            <strong>
+                                12:30 AM
+                            </strong>
+
+                        </div>
+
+
+                        <span class="status-badge active">
+                            Activo
+                        </span>
+
+                    </div>
+
+
+                    <div class="management-card add-card">
+
+                        <button id="btnAddShiftCard">
+
+                            <i class="fa-solid fa-plus"></i>
+
+                            <span>
+                                Agregar nuevo turno
+                            </span>
+
+                        </button>
+
+                    </div>
+
+                </div>
+
+            </section>
+
+
+            <!-- =================================================
+                 CARGOS Y ÁREAS
+            ================================================== -->
+
+            <section
+                id="section-cargos"
+                class="page-section"
+            >
+
+                <div class="section-header">
+
+                    <div>
+
+                        <h2>
+                            Cargos y áreas
+                        </h2>
+
+                        <p>
+                            Configura los cargos y áreas del personal
+                        </p>
+
+                    </div>
+
+
+                    <button
+                        class="btn btn-primary"
+                        id="btnAddPosition"
+                    >
+                        <i class="fa-solid fa-plus"></i>
+                        Agregar cargo
+                    </button>
+
+                </div>
+
+
+                <div class="table-card">
+
+                    <div class="table-responsive">
+
+                        <table class="data-table">
+
+                            <thead>
+
+                                <tr>
+
+                                    <th>
+                                        Cargo
+                                    </th>
+
+                                    <th>
+                                        Área
+                                    </th>
+
+                                    <th>
+                                        Trabajadores
+                                    </th>
+
+                                    <th>
+                                        Estado
+                                    </th>
+
+                                    <th>
+                                        Acciones
+                                    </th>
+
+                                </tr>
+
+                            </thead>
+
+
+                            <tbody>
+
+                                <tr>
+
+                                    <td>
+                                        <strong>Mozo</strong>
+                                    </td>
+
+                                    <td>
+                                        Salón
+                                    </td>
+
+                                    <td>
+                                        8
+                                    </td>
+
+                                    <td>
+
+                                        <span class="status-badge active">
+                                            Activo
+                                        </span>
+
+                                    </td>
+
+                                    <td>
+
+                                        <button class="table-action">
+                                            <i class="fa-solid fa-pen"></i>
+                                        </button>
+
+                                    </td>
+
+                                </tr>
+
+
+                                <tr>
+
+                                    <td>
+                                        <strong>Chef</strong>
+                                    </td>
+
+                                    <td>
+                                        Cocina
+                                    </td>
+
+                                    <td>
+                                        4
+                                    </td>
+
+                                    <td>
+
+                                        <span class="status-badge active">
+                                            Activo
+                                        </span>
+
+                                    </td>
+
+                                    <td>
+
+                                        <button class="table-action">
+                                            <i class="fa-solid fa-pen"></i>
+                                        </button>
+
+                                    </td>
+
+                                </tr>
+
+
+                                <tr>
+
+                                    <td>
+                                        <strong>Bartender</strong>
+                                    </td>
+
+                                    <td>
+                                        Barra
+                                    </td>
+
+                                    <td>
+                                        3
+                                    </td>
+
+                                    <td>
+
+                                        <span class="status-badge active">
+                                            Activo
+                                        </span>
+
+                                    </td>
+
+                                    <td>
+
+                                        <button class="table-action">
+                                            <i class="fa-solid fa-pen"></i>
+                                        </button>
+
+                                    </td>
+
+                                </tr>
+
+                            </tbody>
+
+                        </table>
+
+                    </div>
+
+                </div>
+
+            </section>
+
+
+            <!-- =================================================
+                 REPORTES
+            ================================================== -->
+
+            <section
+                id="section-asistencia"
+                class="page-section"
+            >
+                <div class="section-header">
+                    <div>
+                        <h2>Asistencia del día</h2>
+                        <p>Registra entradas, salidas, tardanzas y horas extras según el turno programado.</p>
+                    </div>
+                    <div class="section-actions">
+                        <input type="date" id="attendanceDate">
+                        <select id="attendanceSedeFilter" required aria-label="Sede de asistencia"></select>
+                        <select id="attendanceTurnoFilter" required aria-label="Turno de asistencia"></select>
+                        <button class="btn btn-secondary" id="exportAttendance"><i class="fa-solid fa-file-csv"></i> Exportar CSV</button>
+                    </div>
+                </div>
+                <div class="attendance-summary" id="attendanceSummary"></div>
+                <div class="table-card"><div class="table-responsive"><table class="data-table"><thead><tr><th>Trabajador</th><th>Turno</th><th>Entrada programada</th><th>Entrada real</th><th>Salida programada</th><th>Salida real</th><th>Estado</th><th>Acciones</th></tr></thead><tbody id="attendanceTableBody"></tbody></table></div></div>
+            </section>
+
+            <section
+                id="section-reportes"
+                class="page-section"
+            >
+
+                <div class="section-header">
+
+                    <div>
+
+                        <h2>
+                            Reportes
+                        </h2>
+
+                        <p>
+                            Consulta y exporta información del personal
+                        </p>
+
+                    </div>
+
+                </div>
+
+
+                <div class="report-cards">
+
+                    <div class="report-card">
+
+                        <div class="report-icon">
+                            <i class="fa-solid fa-file-excel"></i>
+                        </div>
+
+                        <div>
+
+                            <h3>
+                                Horario mensual
+                            </h3>
+
+                            <p>
+                                Exportar programación mensual.
+                            </p>
+
+                            <button class="btn btn-secondary">
+                                Exportar
+                            </button>
+
+                        </div>
+
+                    </div>
+
+
+                    <div class="report-card">
+
+                        <div class="report-icon">
+                            <i class="fa-solid fa-file-pdf"></i>
+                        </div>
+
+                        <div>
+
+                            <h3>
+                                Horario semanal
+                            </h3>
+
+                            <p>
+                                Generar horario semanal.
+                            </p>
+
+                            <button class="btn btn-secondary">
+                                Exportar
+                            </button>
+
+                        </div>
+
+                    </div>
+
+
+                    <div class="report-card">
+
+                        <div class="report-icon">
+                            <i class="fa-solid fa-users"></i>
+                        </div>
+
+                        <div>
+
+                            <h3>
+                                Personal
+                            </h3>
+
+                            <p>
+                                Lista completa de trabajadores.
+                            </p>
+
+                            <button class="btn btn-secondary">
+                                Exportar
+                            </button>
+
+                        </div>
+
+                    </div>
+
+                </div>
+
+            </section>
+
+        </div>
+
+    </main>
+
+</div>
+
+
+<!-- =========================================================
+     MODAL: TRABAJADOR
+========================================================= -->
+
+<div
+    class="modal-overlay"
+    id="workerModal"
+>
+
+    <div class="modal large-modal">
+
+        <div class="modal-header">
+
+            <div>
+
+                <h2 id="workerModalTitle">
+                    Nuevo trabajador
+                </h2>
+
+                <p>
+                    Registra la información del trabajador
+                </p>
+
+            </div>
+
+            <button
+                class="modal-close"
+                data-close-modal="workerModal"
+            >
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+
+        </div>
+
+
+        <form id="workerForm">
+
+            <div class="modal-body">
+
+
+                <!-- DATOS PERSONALES -->
+
+                <div class="form-section">
+
+                    <h3>
+                        <i class="fa-solid fa-user"></i>
+                        Datos personales
+                    </h3>
+
+
+                    <div class="form-grid">
+
+
+                        <div class="form-group">
+
+                            <label>
+                                Nombre *
+                            </label>
+
+                            <input
+                                type="text"
+                                id="workerName"
+                                required
+                            >
+
+                        </div>
+
+
+                        <div class="form-group">
+
+                            <label>
+                                Apellido *
+                            </label>
+
+                            <input
+                                type="text"
+                                id="workerLastName"
+                                required
+                            >
+
+                        </div>
+
+
+                        <div class="form-group">
+
+                            <label>
+                                DNI *
+                            </label>
+
+                            <input
+                                type="text"
+                                id="workerDni"
+                                maxlength="8"
+                                required
+                            >
+
+                        </div>
+
+
+                        <div class="form-group">
+
+                            <label>
+                                Teléfono
+                            </label>
+
+                            <input
+                                type="tel"
+                                id="workerPhone"
+                            >
+
+                        </div>
+
+
+                        <div class="form-group">
+
+                            <label>
+                                Cumpleaños
+                            </label>
+
+                            <input
+                                type="date"
+                                id="workerBirthday"
+                            >
+
+                        </div>
+
+
+                        <div class="form-group">
+
+                            <label>
+                                Fecha de ingreso
+                            </label>
+
+                            <input
+                                type="date"
+                                id="workerEntryDate"
+                            >
+
+                        </div>
+
+
+                        <div class="form-group full-width">
+
+                            <label>
+                                Dirección
+                            </label>
+
+                            <input
+                                type="text"
+                                id="workerAddress"
+                            >
+
+                        </div>
+
+
+                        <div class="form-group">
+
+                            <label>
+                                Número de emergencia
+                            </label>
+
+                            <input
+                                type="tel"
+                                id="workerEmergency"
+                            >
+
+                        </div>
+
+                    </div>
+
+                </div>
+
+
+                <!-- INFORMACIÓN PROFESIONAL -->
+
+                <div class="form-section">
+
+                    <h3>
+                        <i class="fa-solid fa-briefcase"></i>
+                        Información profesional
+                    </h3>
+
+
+                    <div class="form-grid">
+
+
+                        <div class="form-group">
+
+                            <label>
+                                Grado profesional
+                            </label>
+
+                            <select id="workerDegree">
+
+                                <option value="">
+                                    Seleccionar
+                                </option>
+
+                                <option>
+                                    Secundaria
+                                </option>
+
+                                <option>
+                                    Técnico
+                                </option>
+
+                                <option>
+                                    Bachiller
+                                </option>
+
+                                <option>
+                                    Titulado
+                                </option>
+
+                                <option>
+                                    Maestría
+                                </option>
+
+                                <option>
+                                    Doctorado
+                                </option>
+
+                                <option>
+                                    Otro
+                                </option>
+
+                            </select>
+
+                        </div>
+
+
+                        <div class="form-group">
+
+                            <label>
+                                Profesión
+                            </label>
+
+                            <input
+                                type="text"
+                                id="workerProfession"
+                            >
+
+                        </div>
+
+                        <div class="form-group">
+                            <label>Institución de estudios</label>
+                            <input type="text" id="workerInstitution" placeholder="Instituto, universidad o colegio">
+                        </div>
+
+
+                        <div class="form-group">
+
+                            <label>
+                                Área
+                            </label>
+
+                            <select id="workerArea">
+
+                                <option value="">
+                                    Seleccionar
+                                </option>
+
+                                <option>
+                                    Cocina
+                                </option>
+
+                                <option>
+                                    Salón
+                                </option>
+
+                                <option>
+                                    Barra
+                                </option>
+
+                                <option>
+                                    Producción
+                                </option>
+
+                                <option>
+                                    Caja
+                                </option>
+
+                                <option>
+                                    Administración
+                                </option>
+
+                                <option>
+                                    Marketing
+                                </option>
+
+                                <option>
+                                    TI
+                                </option>
+
+                                <option>
+                                    Recursos Humanos
+                                </option>
+
+                            </select>
+
+                        </div>
+
+
+                        <div class="form-group">
+
+                            <label>
+                                Cargo principal
+                            </label>
+
+                            <input id="workerPosition" list="workerPositionOptions" placeholder="Escribe o selecciona un cargo" autocomplete="off">
+                            <datalist id="workerPositionOptions"></datalist>
+
+                        </div>
+
+
+                        <div class="form-group full-width">
+
+                            <label>
+                                Otros cargos
+                            </label>
+
+                            <div id="workerOtherPositions" class="checkbox-list" aria-label="Otros cargos"></div>
+
+                            <small>
+                                El trabajador puede desempeñar más de un cargo.
+                            </small>
+
+                        </div>
+
+                    </div>
+
+                </div>
+
+
+                <!-- ASIGNACIÓN ACTUAL -->
+
+                <div class="form-section">
+
+                    <h3>
+                        <i class="fa-solid fa-calendar-check"></i>
+                        Asignación actual
+                    </h3>
+
+
+                    <div class="form-grid">
+
+
+                        <div class="form-group">
+
+                            <label>
+                                Sede actual *
+                            </label>
+
+                            <select id="workerLocation">
+
+                                <option value="">
+                                    Seleccionar sede
+                                </option>
+
+                                <option value="sede20">
+                                    Sede 20
+                                </option>
+
+                                <option value="sede17">
+                                    Sede 17
+                                </option>
+
+                            </select>
+
+                        </div>
+
+
+                        <div class="form-group">
+
+                            <label>
+                                Turno habitual *
+                            </label>
+
+                            <select id="workerShift">
+
+                                <option value="">
+                                    Seleccionar turno
+                                </option>
+
+                                <option value="day">
+                                    ☀️ Día
+                                </option>
+
+                                <option value="night">
+                                    🌙 Noche
+                                </option>
+
+                            </select>
+
+                        </div>
+
+
+                        <div class="form-group">
+
+                            <label>
+                                Día de descanso
+                            </label>
+
+                            <select id="workerRestDay">
+
+                                <option>
+                                    Lunes
+                                </option>
+
+                                <option>
+                                    Martes
+                                </option>
+
+                                <option>
+                                    Miércoles
+                                </option>
+
+                                <option>
+                                    Jueves
+                                </option>
+
+                                <option>
+                                    Viernes
+                                </option>
+
+                                <option>
+                                    Sábado
+                                </option>
+
+                                <option>
+                                    Domingo
+                                </option>
+
+                            </select>
+
+                        </div>
+
+
+                        <div class="form-group">
+
+                            <label>
+                                Estado
+                            </label>
+
+                            <select id="workerStatus">
+
+                                <option value="active">
+                                    Activo
+                                </option>
+
+                                <option value="inactive">
+                                    Inactivo
+                                </option>
+
+                            </select>
+
+                        </div>
+
+                    </div>
+
+
+                    <div class="assignment-notice">
+
+                        <i class="fa-solid fa-circle-info"></i>
+
+                        <div>
+
+                            <strong>
+                                La asignación puede cambiar
+                            </strong>
+
+                            <p>
+                                Si el trabajador cambia definitivamente
+                                de sede o turno, podrás registrar el cambio
+                                con una fecha de inicio.
+                            </p>
+
+                        </div>
+
+                    </div>
+
+                </div>
+
+            </div>
+
+
+            <div class="modal-footer">
+
+                <button
+                    type="button"
+                    class="btn btn-secondary"
+                    data-close-modal="workerModal"
+                >
+                    Cancelar
+                </button>
+
+                <button
+                    type="submit"
+                    class="btn btn-primary"
+                >
+                    <i class="fa-solid fa-save"></i>
+                    Guardar trabajador
+                </button>
+
+            </div>
+
+        </form>
+
+    </div>
+
+</div>
+
+
+<!-- =========================================================
+     MODAL: CONFIGURAR DÍA
+========================================================= -->
+
+<div
+    class="modal-overlay"
+    id="dayModal"
+>
+
+    <div class="modal">
+
+        <div class="modal-header">
+
+            <div>
+
+                <h2>
+                    Configurar día
+                </h2>
+
+                <p id="selectedDateText">
+                    Miércoles 19 de agosto
+                </p>
+
+            </div>
+
+            <button
+                class="modal-close"
+                data-close-modal="dayModal"
+            >
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+
+        </div>
+
+
+        <div class="modal-body">
+
+
+            <!-- RESUMEN DEL DÍA -->
+
+            <div class="day-summary">
+
+                <div>
+
+                    <span>
+                        Trabajadores
+                    </span>
+
+                    <strong id="dayTotalWorkers">
+                        25
+                    </strong>
+
+                </div>
+
+
+                <div>
+
+                    <span>
+                        Turno día
+                    </span>
+
+                    <strong id="dayTotalDay">
+                        15
+                    </strong>
+
+                </div>
+
+
+                <div>
+
+                    <span>
+                        Turno noche
+                    </span>
+
+                    <strong id="dayTotalNight">
+                        10
+                    </strong>
+
+                </div>
+
+
+                <div>
+
+                    <span>
+                        Dobletes
+                    </span>
+
+                    <strong id="dayTotalDouble">
+                        3
+                    </strong>
+
+                </div>
+
+            </div>
+
+
+            <!-- ACCIONES -->
+
+            <div class="day-actions">
+
+                <button
+                    class="action-card"
+                    id="btnDayAssignment"
+                >
+
+                    <i class="fa-solid fa-user-clock"></i>
+
+                    <strong>
+                        Cambiar turno
+                    </strong>
+
+                    <span>
+                        Modificar el turno solo para este día
+                    </span>
+
+                </button>
+
+
+                <button
+                    class="action-card"
+                    id="btnSupportAssignment"
+                >
+
+                    <i class="fa-solid fa-building-circle-arrow-right"></i>
+
+                    <strong>
+                        Asignar apoyo
+                    </strong>
+
+                    <span>
+                        Enviar trabajador temporalmente a otra sede
+                    </span>
+
+                </button>
+
+
+                <button
+                    class="action-card"
+                    id="btnDoubleShift"
+                >
+
+                    <i class="fa-solid fa-repeat"></i>
+
+                    <strong>
+                        Registrar doblete
+                    </strong>
+
+                    <span>
+                        Día + noche
+                    </span>
+
+                </button>
+
+
+                <button
+                    class="action-card"
+                    id="btnSpecialStatus"
+                >
+
+                    <i class="fa-solid fa-file-circle-exclamation"></i>
+
+                    <strong>
+                        Registrar incidencia
+                    </strong>
+
+                    <span>
+                        Permiso, falta, vacaciones, etc.
+                    </span>
+
+                </button>
+
+            </div>
+
+
+            <!-- PERSONAL DEL DÍA -->
+
+            <div class="day-workers">
+
+                <div class="subsection-header">
+
+                    <h3>
+                        Personal programado
+                    </h3>
+
+                    <button
+                        class="btn btn-small btn-secondary"
+                    >
+                        <i class="fa-solid fa-filter"></i>
+                        Filtrar
+                    </button>
+
+                </div>
+
+
+                <div id="dayWorkersList">
+
+                    <!-- JS -->
+
+                </div>
+
+            </div>
+
+        </div>
+
+
+        <div class="modal-footer">
+
+            <button
+                class="btn btn-secondary"
+                data-close-modal="dayModal"
+            >
+                Cerrar
+            </button>
+
+        </div>
+
+    </div>
+
+</div>
+
+
+<!-- =========================================================
+     MODAL: CAMBIO TEMPORAL
+========================================================= -->
+
+<div
+    class="modal-overlay"
+    id="assignmentModal"
+>
+
+    <div class="modal">
+
+        <div class="modal-header">
+
+            <div>
+
+                <h2>
+                    Cambio temporal
+                </h2>
+
+                <p>
+                    Modificación para una fecha específica
+                </p>
+
+            </div>
+
+            <button
+                class="modal-close"
+                data-close-modal="assignmentModal"
+            >
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+
+        </div>
+
+
+        <form id="assignmentForm">
+
+            <div class="modal-body">
+
+
+                <div class="form-group">
+
+                    <label>
+                        Trabajador
+                    </label>
+
+                    <select id="assignmentWorker">
+
+                        <option>
+                            Seleccionar trabajador
+                        </option>
+
+                    </select>
+
+                </div>
+
+
+                <div class="form-group">
+
+                    <label>
+                        Tipo de cambio
+                    </label>
+
+                    <select id="assignmentType">
+
+                        <option value="shift">
+                            Cambio de turno
+                        </option>
+
+                        <option value="support">
+                            Apoyo en otra sede
+                        </option>
+
+                        <option value="double">
+                            Doblete
+                        </option>
+
+                        <option value="rest">
+                            Cambio de descanso
+                        </option>
+
+                    </select>
+
+                </div>
+
+
+                <div class="form-grid">
+
+
+                    <div class="form-group">
+
+                        <label>
+                            Sede
+                        </label>
+
+                        <select id="assignmentLocation">
+
+                            <option>
+                                Sede 20
+                            </option>
+
+                            <option>
+                                Sede 17
+                            </option>
+
+                        </select>
+
+                    </div>
+
+
+                    <div class="form-group">
+
+                        <label>
+                            Turno
+                        </label>
+
+                        <select id="assignmentShift">
+
+                            <option>
+                                Día
+                            </option>
+
+                            <option>
+                                Noche
+                            </option>
+
+                        </select>
+
+                    </div>
+
+                </div>
+
+
+                <div class="assignment-preview">
+
+                    <span>
+                        Configuración habitual
+                    </span>
+
+                    <div>
+
+                        <strong>
+                            Sede 20
+                        </strong>
+
+                        <span>
+                            ☀️ Día
+                        </span>
+
+                    </div>
+
+
+                    <i class="fa-solid fa-arrow-down"></i>
+
+
+                    <span>
+                        Configuración para este día
+                    </span>
+
+                    <div class="new-assignment">
+
+                        <strong>
+                            Sede 17
+                        </strong>
+
+                        <span>
+                            🌙 Noche
+                        </span>
+
+                    </div>
+
+                </div>
+
+
+                <div class="form-group">
+
+                    <label>
+                        Motivo
+                    </label>
+
+                    <textarea
+                        id="assignmentReason"
+                        rows="3"
+                        placeholder="Indique el motivo del cambio..."
+                    ></textarea>
+
+                </div>
+
+            </div>
+
+
+            <div class="modal-footer">
+
+                <button
+                    type="button"
+                    class="btn btn-secondary"
+                    data-close-modal="assignmentModal"
+                >
+                    Cancelar
+                </button>
+
+                <button
+                    type="submit"
+                    class="btn btn-primary"
+                >
+                    Guardar cambio
+                </button>
+
+            </div>
+
+        </form>
+
+    </div>
+
+</div>
+
+
+<!-- =========================================================
+     MODAL: PERMISO / INCIDENCIA
+========================================================= -->
+
+<div
+    class="modal-overlay"
+    id="incidentModal"
+>
+
+    <div class="modal">
+
+        <div class="modal-header">
+
+            <div>
+
+                <h2>
+                    Registrar incidencia
+                </h2>
+
+                <p>
+                    Registra una situación especial del trabajador
+                </p>
+
+            </div>
+
+            <button
+                class="modal-close"
+                data-close-modal="incidentModal"
+            >
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+
+        </div>
+
+
+        <form id="incidentForm">
+
+            <div class="modal-body">
+
+
+                <div class="form-group">
+
+                    <label>
+                        Trabajador
+                    </label>
+
+                    <select id="incidentWorker">
+
+                        <option>
+                            Seleccionar trabajador
+                        </option>
+
+                    </select>
+
+                </div>
+
+
+                <div class="form-group">
+
+                    <label>
+                        Tipo
+                    </label>
+
+                    <select id="incidentType">
+
+                        <option value="rest">
+                            Descanso
+                        </option>
+
+                        <option value="permission">
+                            Permiso
+                        </option>
+
+                        <option value="absence">
+                            Falta
+                        </option>
+
+                        <option value="vacation">
+                            Vacaciones
+                        </option>
+
+                        <option value="suspension">
+                            Suspensión
+                        </option>
+
+                        <option value="incapacity">
+                            Incapacidad
+                        </option>
+
+                        <option value="other">
+                            Otro
+                        </option>
+
+                    </select>
+
+                </div>
+
+
+                <div class="form-grid">
+
+                    <div class="form-group">
+
+                        <label>
+                            Desde
+                        </label>
+
+                        <input
+                            type="date"
+                            id="incidentStart"
+                        >
+
+                    </div>
+
+
+                    <div class="form-group">
+
+                        <label>
+                            Hasta
+                        </label>
+
+                        <input
+                            type="date"
+                            id="incidentEnd"
+                        >
+
+                    </div>
+
+                </div>
+
+
+                <div class="form-group">
+
+                    <label>
+                        Turno afectado
+                    </label>
+
+                    <select id="incidentShift">
+
+                        <option value="all">
+                            Todo el día
+                        </option>
+
+                        <option value="day">
+                            ☀️ Día
+                        </option>
+
+                        <option value="night">
+                            🌙 Noche
+                        </option>
+
+                    </select>
+
+                </div>
+
+
+                <div class="form-group">
+
+                    <label>
+                        Motivo *
+                    </label>
+
+                    <textarea
+                        id="incidentReason"
+                        rows="4"
+                        placeholder="Escriba el motivo..."
+                        required
+                    ></textarea>
+
+                </div>
+
+            </div>
+
+
+            <div class="modal-footer">
+
+                <button
+                    type="button"
+                    class="btn btn-secondary"
+                    data-close-modal="incidentModal"
+                >
+                    Cancelar
+                </button>
+
+                <button
+                    type="submit"
+                    class="btn btn-primary"
+                >
+                    <i class="fa-solid fa-save"></i>
+                    Registrar
+                </button>
+
+            </div>
+
+        </form>
+
+    </div>
+
+</div>
+
+
+<!-- =========================================================
+     MODAL: CAMBIO PERMANENTE
+========================================================= -->
+
+<div
+    class="modal-overlay"
+    id="permanentChangeModal"
+>
+
+    <div class="modal">
+
+        <div class="modal-header">
+
+            <div>
+
+                <h2>
+                    Cambiar asignación
+                </h2>
+
+                <p>
+                    Cambio de sede o turno con fecha de vigencia
+                </p>
+
+            </div>
+
+            <button
+                class="modal-close"
+                data-close-modal="permanentChangeModal"
+            >
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+
+        </div>
+
+
+        <form id="permanentChangeForm">
+
+            <div class="modal-body">
+
+
+                <div class="assignment-current">
+
+                    <span>
+                        ASIGNACIÓN ACTUAL
+                    </span>
+
+                    <div>
+
+                        <strong id="currentWorkerName">
+                            Juan Pérez
+                        </strong>
+
+                        <small>
+                            Sede 20 · Turno Día
+                        </small>
+
+                    </div>
+
+                </div>
+
+
+                <div class="form-group">
+
+                    <label>
+                        Nueva sede
+                    </label>
+
+                    <select>
+
+                        <option>
+                            Sede 17
+                        </option>
+
+                        <option>
+                            Sede 20
+                        </option>
+
+                    </select>
+
+                </div>
+
+
+                <div class="form-group">
+
+                    <label>
+                        Nuevo turno
+                    </label>
+
+                    <select>
+
+                        <option>
+                            Mantener turno actual
+                        </option>
+
+                        <option>
+                            Día
+                        </option>
+
+                        <option>
+                            Noche
+                        </option>
+
+                    </select>
+
+                </div>
+
+
+                <div class="form-group">
+
+                    <label>
+                        Fecha desde la cual aplica *
+                    </label>
+
+                    <input
+                        type="date"
+                        required
+                    >
+
+                </div>
+
+
+                <div class="assignment-notice">
+
+                    <i class="fa-solid fa-clock-rotate-left"></i>
+
+                    <div>
+
+                        <strong>
+                            Se conservará el historial
+                        </strong>
+
+                        <p>
+                            El sistema no eliminará la asignación anterior.
+                            Registrará el cambio y su fecha de vigencia.
+                        </p>
+
+                    </div>
+
+                </div>
+
+            </div>
+
+
+            <div class="modal-footer">
+
+                <button
+                    type="button"
+                    class="btn btn-secondary"
+                    data-close-modal="permanentChangeModal"
+                >
+                    Cancelar
+                </button>
+
+                <button
+                    type="submit"
+                    class="btn btn-primary"
+                >
+                    <i class="fa-solid fa-check"></i>
+                    Confirmar cambio
+                </button>
+
+            </div>
+
+        </form>
+
+    </div>
+
+</div>
+
+
+<!-- =========================================================
+     TOAST / NOTIFICACIONES
+========================================================= -->
+
+<div
+    class="toast-container"
+    id="toastContainer"
+>
+
+    <!-- JS GENERARÁ NOTIFICACIONES -->
+
+</div>
+
+
+<!-- =========================================================
+     JAVASCRIPT
+========================================================= -->
+
+</div>
+{% endblock %}

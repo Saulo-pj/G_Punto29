@@ -5,3 +5,15 @@ __pycache__/
 instance/*.db
 instance/*.sqlite
 cookies.txt
+*.db
+*.sqlite
+*.sqlite3
+*.bak
+*.xlsx
+*.xls
+reporte_*.xlsx
+reporte_*.csv
+*.log
+.pytest_cache/
+.coverage
+htmlcov/

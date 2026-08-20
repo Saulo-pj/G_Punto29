@@ -1,0 +1,890 @@
+/* =========================================================
+   CALENDARIO MENSUAL
+========================================================= */
+
+.calendar-card {
+
+    background: var(--white);
+
+    border: 1px solid var(--gray-200);
+
+    border-radius: var(--border-radius);
+
+    overflow: hidden;
+
+}
+
+
+/* =========================================================
+   HEADER DEL CALENDARIO
+========================================================= */
+
+.calendar-header {
+
+    height: 65px;
+
+    display: flex;
+
+    align-items: center;
+
+    justify-content: center;
+
+    gap: 18px;
+
+    border-bottom: 1px solid var(--gray-200);
+
+    position: relative;
+
+}
+
+.calendar-title {
+
+    display: flex;
+
+    align-items: center;
+
+    gap: 10px;
+
+}
+
+.calendar-title h2 {
+
+    font-size: 16px;
+
+    color: var(--gray-800);
+
+    min-width: 150px;
+
+    text-align: center;
+
+}
+
+.calendar-nav {
+
+    width: 32px;
+    height: 32px;
+
+    border: 1px solid var(--gray-200);
+
+    background: var(--white);
+
+    color: var(--gray-500);
+
+    border-radius: 7px;
+
+    display: flex;
+
+    align-items: center;
+    justify-content: center;
+
+}
+
+.calendar-nav:hover {
+
+    color: var(--primary);
+
+    border-color: var(--primary);
+
+    background: var(--primary-light);
+
+}
+
+.today-button {
+
+    border: none;
+
+    background: var(--primary-light);
+
+    color: var(--primary);
+
+    padding: 5px 9px;
+
+    border-radius: 5px;
+
+    font-size: 9px;
+
+    font-weight: 600;
+
+}
+
+
+/* =========================================================
+   DÍAS DE LA SEMANA
+========================================================= */
+
+.calendar-weekdays {
+
+    display: grid;
+
+    grid-template-columns:
+        repeat(7, 1fr);
+
+    border-bottom: 1px solid var(--gray-200);
+
+}
+
+.calendar-weekdays > div {
+
+    padding: 10px;
+
+    text-align: center;
+
+    font-size: 9px;
+
+    font-weight: 700;
+
+    color: var(--gray-400);
+
+    border-right: 1px solid var(--gray-100);
+
+}
+
+.calendar-weekdays > div:last-child {
+
+    border-right: none;
+
+}
+
+
+/* =========================================================
+   GRID DEL CALENDARIO
+========================================================= */
+
+.calendar-grid {
+
+    display: grid;
+
+    grid-template-columns:
+        repeat(7, 1fr);
+
+}
+
+.calendar-day {
+
+    min-height: 115px;
+
+    padding: 8px;
+
+    border-right: 1px solid var(--gray-100);
+
+    border-bottom: 1px solid var(--gray-100);
+
+    cursor: pointer;
+
+    transition: background 0.15s ease;
+
+    position: relative;
+
+}
+
+.calendar-day:hover {
+
+    background: var(--gray-50);
+
+}
+
+.calendar-day:nth-child(7n) {
+
+    border-right: none;
+
+}
+
+
+/* =========================================================
+   DÍA FUERA DEL MES
+========================================================= */
+
+.calendar-day.other-month {
+
+    background: #fafafa;
+
+}
+
+.calendar-day.other-month .day-number {
+
+    color: var(--gray-300);
+
+}
+
+
+/* =========================================================
+   NÚMERO DEL DÍA
+========================================================= */
+
+.day-number {
+
+    width: 25px;
+    height: 25px;
+
+    display: flex;
+
+    align-items: center;
+    justify-content: center;
+
+    border-radius: 50%;
+
+    font-size: 11px;
+
+    font-weight: 600;
+
+    color: var(--gray-700);
+
+    margin-bottom: 4px;
+
+}
+
+.calendar-day.today .day-number {
+
+    background: var(--primary);
+
+    color: white;
+
+}
+
+
+/* =========================================================
+   RESUMEN DEL DÍA
+========================================================= */
+
+.day-worker-count {
+
+    display: flex;
+
+    align-items: center;
+
+    gap: 5px;
+
+    margin-bottom: 5px;
+
+}
+
+.day-worker-count i {
+
+    font-size: 9px;
+
+    color: var(--primary);
+
+}
+
+.day-worker-count span {
+
+    font-size: 9px;
+
+    color: var(--gray-600);
+
+    font-weight: 600;
+
+}
+
+
+/* =========================================================
+   MINI ESTADÍSTICAS
+========================================================= */
+
+.day-mini-stats {
+
+    display: flex;
+
+    gap: 4px;
+
+    flex-wrap: wrap;
+
+    margin-bottom: 5px;
+
+}
+
+.mini-stat {
+
+    font-size: 8px;
+
+    padding: 2px 5px;
+
+    border-radius: 4px;
+
+    font-weight: 600;
+
+}
+
+.mini-stat.day {
+
+    background: var(--orange-light);
+
+    color: var(--orange);
+
+}
+
+.mini-stat.night {
+
+    background: var(--purple-light);
+
+    color: var(--purple);
+
+}
+
+.mini-stat.double {
+
+    background: var(--danger-light);
+
+    color: var(--danger);
+
+}
+
+
+/* =========================================================
+   ESTADOS DEL DÍA
+========================================================= */
+
+.day-events {
+
+    display: flex;
+
+    flex-direction: column;
+
+    gap: 3px;
+
+}
+
+.day-event {
+
+    padding: 3px 5px;
+
+    border-radius: 4px;
+
+    font-size: 8px;
+
+    overflow: hidden;
+
+    white-space: nowrap;
+
+    text-overflow: ellipsis;
+
+}
+
+.day-event.support {
+
+    background: var(--primary-light);
+
+    color: var(--primary);
+
+}
+
+.day-event.permission {
+
+    background: var(--warning-light);
+
+    color: var(--warning);
+
+}
+
+.day-event.vacation {
+
+    background: var(--success-light);
+
+    color: var(--success);
+
+}
+
+.day-event.absence {
+
+    background: var(--danger-light);
+
+    color: var(--danger);
+
+}
+
+
+/* =========================================================
+   WEEKLY CALENDAR
+========================================================= */
+
+.weekly-calendar {
+
+    width: 100%;
+
+    overflow-x: auto;
+
+}
+
+.week-table {
+
+    min-width: 1050px;
+
+}
+
+.week-table-header {
+
+    display: grid;
+
+    grid-template-columns:
+        190px
+        repeat(7, minmax(110px, 1fr));
+
+    background: var(--gray-50);
+
+    border-bottom: 1px solid var(--gray-200);
+
+}
+
+.week-table-header > div {
+
+    min-height: 55px;
+
+    display: flex;
+
+    flex-direction: column;
+
+    align-items: center;
+
+    justify-content: center;
+
+    border-right: 1px solid var(--gray-200);
+
+    font-size: 9px;
+
+    font-weight: 700;
+
+    color: var(--gray-500);
+
+}
+
+.week-table-header .worker-column {
+
+    align-items: flex-start;
+
+    padding-left: 15px;
+
+}
+
+.week-table-header strong {
+
+    font-size: 16px;
+
+    color: var(--gray-800);
+
+}
+
+.week-table-header .current-day {
+
+    background: var(--primary-light);
+
+    color: var(--primary);
+
+}
+
+.week-table-header .current-day strong {
+
+    color: var(--primary);
+
+}
+
+
+/* =========================================================
+   WEEK BODY
+========================================================= */
+
+.week-table-body {
+
+    width: 100%;
+
+}
+
+.week-worker-row {
+
+    display: grid;
+
+    grid-template-columns:
+        190px
+        repeat(7, minmax(110px, 1fr));
+
+    min-height: 70px;
+
+    border-bottom: 1px solid var(--gray-100);
+
+}
+
+.week-worker-row:hover {
+
+    background: var(--gray-50);
+
+}
+
+
+/* =========================================================
+   TRABAJADOR SEMANAL
+========================================================= */
+
+.week-worker-name {
+
+    padding: 10px 12px;
+
+    display: flex;
+
+    align-items: center;
+
+    gap: 8px;
+
+    border-right: 1px solid var(--gray-200);
+
+    background: var(--white);
+
+    position: sticky;
+
+    left: 0;
+
+    z-index: 2;
+
+}
+
+.week-worker-avatar {
+
+    width: 29px;
+    height: 29px;
+
+    border-radius: 50%;
+
+    background: var(--primary-light);
+
+    color: var(--primary);
+
+    display: flex;
+
+    align-items: center;
+    justify-content: center;
+
+    font-size: 9px;
+
+    font-weight: 700;
+
+    flex-shrink: 0;
+
+}
+
+.week-worker-name strong {
+
+    display: block;
+
+    font-size: 9px;
+
+    color: var(--gray-800);
+
+}
+
+.week-worker-name small {
+
+    display: block;
+
+    font-size: 8px;
+
+    color: var(--gray-400);
+
+}
+
+
+/* =========================================================
+   CELDA SEMANAL
+========================================================= */
+
+.week-day-cell {
+
+    padding: 7px;
+
+    border-right: 1px solid var(--gray-100);
+
+    display: flex;
+
+    flex-direction: column;
+
+    justify-content: center;
+
+    gap: 4px;
+
+    cursor: pointer;
+
+}
+
+.week-day-cell:hover {
+
+    background: var(--gray-50);
+
+}
+
+
+/* =========================================================
+   TURNO EN VISTA SEMANAL
+========================================================= */
+
+.week-shift {
+
+    padding: 5px 6px;
+
+    border-radius: 5px;
+
+    font-size: 8px;
+
+    font-weight: 600;
+
+}
+
+.week-shift.day {
+
+    background: var(--orange-light);
+
+    color: var(--orange);
+
+}
+
+.week-shift.night {
+
+    background: var(--purple-light);
+
+    color: var(--purple);
+
+}
+
+.week-shift.rest {
+
+    background: var(--gray-100);
+
+    color: var(--gray-500);
+
+}
+
+.week-shift.permission {
+
+    background: var(--warning-light);
+
+    color: var(--warning);
+
+}
+
+.week-shift.absence {
+
+    background: var(--danger-light);
+
+    color: var(--danger);
+
+}
+
+.week-shift.vacation {
+
+    background: var(--success-light);
+
+    color: var(--success);
+
+}
+
+.week-shift.double {
+
+    background: var(--purple-light);
+
+    color: var(--purple);
+
+}
+
+.week-shift.support {
+
+    background: var(--primary-light);
+
+    color: var(--primary);
+
+}
+
+.week-shift.change-turn {
+
+    background: linear-gradient(135deg, #15803D 0 50%, #D97706 50% 100%);
+
+    color: #ffffff;
+
+}
+
+.week-shift.double {
+
+    background: #7E22CE;
+
+    color: #ffffff;
+
+}
+
+.week-shift.support {
+
+    background: #581C87;
+
+    color: #ffffff;
+
+}
+
+
+/* =========================================================
+   SEDE DENTRO DE CELDA
+========================================================= */
+
+.week-location {
+
+    font-size: 7px;
+
+    color: var(--gray-400);
+
+    padding-left: 2px;
+
+}
+
+
+/* =========================================================
+   DOBLETE
+========================================================= */
+
+.double-shift {
+
+    display: flex;
+
+    flex-direction: column;
+
+    gap: 3px;
+
+}
+
+.double-shift .day-part {
+
+    background: var(--purple-light);
+
+    color: var(--purple);
+
+    padding: 3px 5px;
+
+    border-radius: 4px;
+
+    font-size: 7px;
+
+    font-weight: 600;
+
+}
+
+.double-shift .night-part {
+
+    background: var(--purple-light);
+
+    color: var(--purple);
+
+    padding: 3px 5px;
+
+    border-radius: 4px;
+
+    font-size: 7px;
+
+    font-weight: 600;
+
+}
+
+
+/* =========================================================
+   LEYENDA
+========================================================= */
+
+.calendar-legend {
+
+    display: flex;
+
+    align-items: center;
+
+    flex-wrap: wrap;
+
+    gap: 15px;
+
+    padding: 13px 15px;
+
+    border-top: 1px solid var(--gray-200);
+
+}
+
+.calendar-legend span {
+
+    display: flex;
+
+    align-items: center;
+
+    gap: 5px;
+
+    font-size: 9px;
+
+    color: var(--gray-500);
+
+}
+
+.legend-dot {
+
+    width: 8px;
+    height: 8px;
+
+    border-radius: 50%;
+
+}
+
+.legend-dot.work {
+
+    background: var(--success);
+
+}
+
+.legend-dot.rest {
+
+    background: var(--gray-400);
+
+}
+
+.legend-dot.permission {
+
+    background: var(--warning);
+
+}
+
+.legend-dot.absence {
+
+    background: var(--danger);
+
+}
+
+.legend-dot.vacation {
+
+    background: var(--success);
+
+}
+
+.legend-dot.double {
+
+    background: var(--danger);
+
+}
+
+.legend-dot.support {
+
+    background: var(--primary);
+
+}
+
+
+/* =========================================================
+   ANIMACIÓN
+========================================================= */
+
+.calendar-day,
+.week-day-cell {
+
+    animation: calendarAppear 0.15s ease;
+
+}
+
+@keyframes calendarAppear {
+
+    from {
+
+        opacity: 0;
+
+    }
+
+    to {
+
+        opacity: 1;
+
+    }
+
+}

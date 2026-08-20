@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'p29-v2';
+const CACHE_VERSION = 'p29-v3';
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const PAGE_CACHE = `${CACHE_VERSION}-pages`;
 
@@ -24,6 +24,17 @@ self.addEventListener('message', (event) => {
   if (event.data && event.data.type === 'SKIP_WAITING') {
     self.skipWaiting();
   }
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  event.waitUntil(clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+    const target = event.notification.data && event.notification.data.url;
+    for (const client of clientList) {
+      if ('focus' in client) return client.focus();
+    }
+    return clients.openWindow(target || '/arqueo');
+  }));
 });
 
 self.addEventListener('activate', (event) => {

@@ -4,6 +4,15 @@
 <h1>Dashboard de arqueo de caja</h1>
 <p class="muted">Fecha operativa: {{ selected_date.strftime('%d/%m/%Y') if selected_date else '-' }}</p>
 
+<form id="arqueo-dashboard-filters" class="inline-form dashboard-period-filters">
+	<div><label>Período</label><select name="period"><option value="week">Semana actual</option><option value="month" selected>Mes actual</option><option value="last_month">Último mes</option><option value="custom">Personalizado</option></select></div>
+	<div><label>Desde</label><input type="date" name="date_start"></div>
+	<div><label>Hasta</label><input type="date" name="date_end"></div>
+	{% if is_admin_general %}<div><label>Sede</label><select name="sede"><option value="">Todas</option>{% for sede in sedes_disponibles %}<option value="{{ sede.id_sede }}">{{ sede.nombre_sede }}</option>{% endfor %}</select></div><div><label>Turno</label><select name="turno"><option value="">Todos</option>{% for turno in turnos_disponibles %}<option value="{{ turno.id_turno }}">{{ turno.nombre_turno }}</option>{% endfor %}</select></div>{% endif %}
+	<button type="submit">Actualizar dashboard</button>
+	<span id="dashboard-refresh-status" class="muted" role="status"></span>
+</form>
+
 <div class="arqueo-dashboard-grid">
 	<div class="card">
 		<h3>Indicadores principales</h3>
@@ -178,6 +187,25 @@
 		var trendData = {{ chart_trend|tojson }};
 		var benchmarkData = {{ chart_benchmark|tojson }};
 		var gananciasData = {{ chart_ganancia_gastos|tojson }};
+		var filters = document.getElementById('arqueo-dashboard-filters');
+		var refreshStatus = document.getElementById('dashboard-refresh-status');
+		if (filters) {
+			filters.addEventListener('submit', function (event) {
+				event.preventDefault();
+				var query = new URLSearchParams(new FormData(filters));
+				if (refreshStatus) refreshStatus.textContent = 'Actualizando...';
+				fetch('{{ url_for("arqueo_dashboard_data") }}?' + query.toString()).then(function (response) { if (!response.ok) throw new Error(); return response.json(); }).then(function (payload) {
+					var rows = payload.items || [];
+					var totalIngresos = rows.reduce(function (sum, item) { return sum + Number(item.ingresos || 0); }, 0);
+					var totalDiferencia = rows.reduce(function (sum, item) { return sum + Number(item.diferencia || 0); }, 0);
+					var kpis = document.querySelectorAll('.arqueo-kpi-item strong');
+					if (kpis[0]) kpis[0].textContent = rows.length;
+					if (kpis[2]) kpis[2].textContent = totalIngresos.toFixed(2);
+					if (kpis[3]) kpis[3].textContent = totalDiferencia.toFixed(2);
+					if (refreshStatus) refreshStatus.textContent = 'Actualizado';
+				}).catch(function () { if (refreshStatus) refreshStatus.textContent = 'No se pudo actualizar'; });
+			});
+		}
 
 		var commonGrid = {
 			drawBorder: false,

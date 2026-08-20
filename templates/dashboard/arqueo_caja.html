@@ -2,23 +2,21 @@
 {% block title %}Arqueo Caja{% endblock %}
 {% block content %}
 <h1>Cierre de caja</h1>
+<div id="cierre-success-toast" class="cierre-success-toast" role="status" aria-live="polite">¡Se guardó la caja con éxito!</div>
+<button type="button" id="arqueo-save-btn" class="arqueo-save-sticky">Guardar</button>
+<div id="arqueo-save-status" class="muted" role="status" aria-live="polite"></div>
 <div class="inventory-actions-top arqueo-actions">
 	<a class="btn-outline" href="{{ url_for('arqueo_dashboard') }}">Ver dashboard de arqueo</a>
-	<button type="button" id="arqueo-export-btn" class="btn-outline">Descargar imagen</button>
+	<button type="button" id="arqueo-export-btn" class="btn-outline">Descargar Arqueo en Imagen (PNG/JPG)</button>
 </div>
 
-{% if is_admin_general %}
-<form method="GET" action="{{ url_for('arqueo_export_month') }}" class="inline-form" style="margin-top:8px;">
-	<div>
-		<label>Mes</label>
-		<input type="month" name="month" value="{{ (loop_month if loop_month is defined else '') }}" required>
-	</div>
-	<div>
-		<label>&nbsp;</label>
-		<button type="submit" class="btn-outline">Descargar Excel (mes)</button>
-	</div>
+<form method="GET" action="{{ url_for('arqueo_export_report') }}" class="inline-form" style="margin-top:8px;">
+	<div><label>Período</label><select name="period"><option value="week">Semana actual</option><option value="month" selected>Mes actual</option><option value="last_month">Último mes</option><option value="custom">Personalizado</option></select></div>
+	<div><label>Desde</label><input type="date" name="date_start"></div>
+	<div><label>Hasta</label><input type="date" name="date_end"></div>
+	{% if is_admin_general %}<div><label>Sede</label><select name="sede"><option value="">Todas</option>{% for s in sedes_disponibles %}<option value="{{ s.id_sede }}">{{ s.nombre_sede }}</option>{% endfor %}</select></div>{% endif %}
+	<div><label>&nbsp;</label><button type="submit" class="btn-outline">Descargar reporte Excel</button></div>
 </form>
-{% endif %}
 
 <div id="arqueo-capture">
 
@@ -47,13 +45,22 @@
 </form>
 {% endif %}
 
+{% set section1_locked = false %}
+{% set delivered_locked = cierre and cierre.efectivo_entregado_guardado and not is_admin_general %}
+{% set left_locked = cierre and cierre.efectivo_dejado_guardado and not is_admin_general %}
+{% set locked_fields_json = locked_fields|default([])|tojson %}
 {% if can_insert or can_update %}
 <form method="POST" class="card cierre-caja-form">
+	<input type="hidden" name="section" value="section1">
 	<h3>Resumen operativo por sede y turno</h3>
 	<p class="muted">Todos los admin sala de la misma sede y turno comparten este mismo cierre.</p>
+	<fieldset {% if section1_locked %}disabled{% endif %}>
 	<div>
-		<label>Monto inicial (Base)</label>
-		<input type="number" step="0.01" name="monto_inicial" value="{{ cierre.monto_inicial if cierre else 0 }}" required>
+		<label>Monto Base Colocado (entrada manual)</label>
+		<input type="number" step="0.01" name="monto_inicial" value="{{ cierre.monto_inicial if cierre else 0 }}" required {% if section1_locked %}disabled{% endif %}>
+		{% if expected_base is defined %}
+			<div class="muted">Monto inicial base esperado (config): {{ '%.2f'|format(expected_base) }}</div>
+		{% endif %}
 	</div>
 
 	<h3>Gastos operativos</h3>
@@ -61,6 +68,11 @@
 		{% if gastos_actuales %}
 			{% for g in gastos_actuales %}
 			<div class="gasto-item">
+				<select name="gasto_tipo[]" required>
+					{% for tipo in ['Productos de cocina faltantes', 'Productos de sala faltantes', 'Comida', 'Propina', 'Marketing', 'Almacén', 'Otros'] %}
+					<option value="{{ tipo }}" {% if g.tipo|default('Otros') == tipo %}selected{% endif %}>{{ tipo }}</option>
+					{% endfor %}
+				</select>
 				<input type="text" name="gasto_nombre[]" value="{{ g.nombre }}" placeholder="Nombre del gasto">
 				<input type="number" step="0.01" name="gasto_monto[]" value="{{ g.monto }}" placeholder="Monto">
 				<button type="button" class="btn-danger remove-gasto">Eliminar</button>
@@ -68,13 +80,22 @@
 			{% endfor %}
 		{% else %}
 			<div class="gasto-item">
+				<select name="gasto_tipo[]" required>
+					<option value="Otros">Otros</option>
+					<option value="Productos de cocina faltantes">Productos de cocina faltantes</option>
+					<option value="Productos de sala faltantes">Productos de sala faltantes</option>
+					<option value="Comida">Comida</option>
+					<option value="Propina">Propina</option>
+					<option value="Marketing">Marketing</option>
+					<option value="Almacén">Almacén</option>
+				</select>
 				<input type="text" name="gasto_nombre[]" placeholder="Nombre del gasto">
 				<input type="number" step="0.01" name="gasto_monto[]" placeholder="Monto">
 				<button type="button" class="btn-danger remove-gasto">Eliminar</button>
 			</div>
 		{% endif %}
 	</div>
-	<button type="button" id="add-gasto-btn" class="btn-outline">Agregar gasto</button>
+	<button type="button" id="add-gasto-btn" class="btn-outline" {% if section1_locked %}disabled{% endif %}>Agregar gasto</button>
 
 	<h3>Ingresos por canales</h3>
 	<div class="grid-2">
@@ -82,41 +103,89 @@
 			<label class="canal-label" for="pos_tarjetas">POS (Tarjetas)</label>
 			<div class="canal-control">
 				<img class="canal-icon" src="{{ url_for('static', filename='img/visa.png') }}" alt="Tarjetas">
-				<input id="pos_tarjetas" type="number" step="0.01" name="pos_tarjetas" value="{{ cierre.pos_tarjetas if cierre else 0 }}" required>
+				<input id="pos_tarjetas" type="number" step="0.01" name="pos_tarjetas" value="{{ cierre.pos_tarjetas if cierre else 0 }}">
 			</div>
 		</div>
 		<div class="ingreso-canal-item">
 			<label class="canal-label" for="yape">Yape</label>
 			<div class="canal-control">
 				<img class="canal-icon" src="{{ url_for('static', filename='img/logo-yape.png') }}" alt="Yape">
-				<input id="yape" type="number" step="0.01" name="yape" value="{{ cierre.yape if cierre else 0 }}" required>
+				<input id="yape" type="number" step="0.01" name="yape" value="{{ cierre.yape if cierre else 0 }}">
 			</div>
 		</div>
 		<div class="ingreso-canal-item">
 			<label class="canal-label" for="plin">Plin</label>
 			<div class="canal-control">
 				<img class="canal-icon" src="{{ url_for('static', filename='img/logo-plin.png') }}" alt="Plin">
-				<input id="plin" type="number" step="0.01" name="plin" value="{{ cierre.plin if cierre else 0 }}" required>
+				<input id="plin" type="number" step="0.01" name="plin" value="{{ cierre.plin if cierre else 0 }}">
 			</div>
 		</div>
 		<div class="ingreso-canal-item">
 			<label class="canal-label" for="efectivo">Efectivo</label>
 			<div class="canal-control">
 				<img class="canal-icon" src="{{ url_for('static', filename='img/dinero-en-efectivo.png') }}" alt="Efectivo">
-				<input id="efectivo" type="number" step="0.01" name="efectivo" value="{{ cierre.efectivo if cierre else 0 }}" required>
+				<input id="efectivo" type="number" step="0.01" name="efectivo" value="{{ cierre.efectivo if cierre else 0 }}">
 			</div>
 		</div>
 	</div>
-
-	<label>Observaciones</label>
-	<textarea name="observaciones" rows="3">{{ cierre.observaciones if cierre else '' }}</textarea>
-
 	<label>Venta del sistema (POS)</label>
 	<input type="number" step="0.01" name="venta_sistema" value="{{ cierre.venta_sistema if cierre else 0 }}" required>
+	</fieldset>
 
-	<button type="submit">Guardar cierre de caja</button>
+	<button type="button" class="section-save-hint" disabled>Se guarda con el botón Guardar</button>
 </form>
 {% endif %}
+
+<section class="card">
+	<h3>Observaciones</h3>
+	<form method="POST" class="inline-form">
+		<input type="hidden" name="section" value="observaciones">
+		<textarea name="observaciones" rows="3">{{ cierre.observaciones if cierre else '' }}</textarea>
+		<button type="button" class="section-save-hint" disabled>Se guarda con el botón Guardar</button>
+	</form>
+</section>
+
+{% if section1_locked and not is_admin_general %}
+<section class="card">
+	<h4>Ajuste incremental de Propina</h4>
+	<p class="muted">El Administrador de Sala solo puede aumentar la propina ya guardada.</p>
+	<form method="POST" class="inline-form">
+		<input type="hidden" name="section" value="propina">
+		<label>Nuevo monto de propina</label>
+		<input type="number" step="0.01" name="propina_monto" min="0" value="0" required>
+		<button type="button" class="section-save-hint" disabled>Se guarda con el botón Guardar</button>
+	</form>
+</section>
+{% endif %}
+
+<section class="card cierre-section {% if not (cierre and cierre.venta_sistema_guardada) %}is-locked{% endif %}">
+	<h3>2. Auditoría de efectivo</h3>
+	<form method="POST" class="cierre-caja-form">
+		<input type="hidden" name="section" value="efectivo_entregado">
+		<fieldset {% if not is_admin_general and (not audit_enabled or delivered_locked) %}disabled{% endif %}>
+			<div class="grid-2 audit-fields">
+				<div class="recommendation-box"><label>Recomendación - Efectivo a entregar</label><strong id="recomendado-efectivo">{{ '%.2f'|format((efectivo|default(0)) - (expected_base|default(0))) }}</strong><small>Efectivo - Monto Inicial Base Esperado</small></div>
+				<div class="field-with-icon"><label for="efectivo_entregado">Efectivo entregado</label><div class="canal-control"><img class="canal-icon" src="{{ url_for('static', filename='img/efectivo_entregado.png') }}" alt="Efectivo entregado"><input id="efectivo_entregado" type="number" step="0.01" name="efectivo_entregado" value="{{ cierre.efectivo_entregado if cierre else 0 }}" required></div></div>
+			</div>
+		</fieldset>
+		<button type="button" class="section-save-hint" disabled>Se guarda con el botón Guardar</button>
+	</form>
+</section>
+
+<section class="card cierre-section {% if not (cierre and cierre.efectivo_entregado_guardado) %}is-locked{% endif %}">
+	<h3>3. Efectivo dejado en caja</h3>
+	<form method="POST" class="cierre-caja-form">
+		<input type="hidden" name="section" value="efectivo_dejado">
+		<fieldset {% if not is_admin_general and (not (cierre and cierre.efectivo_entregado_guardado) or left_locked) %}disabled{% endif %}>
+			<div class="grid-2 left-cash-fields">
+				<div class="recommendation-box"><label>Efectivo dejado en caja (Recomendado)</label><strong id="efectivo-dejado-recomendado">{{ '%.2f'|format(cierre.efectivo_dejado_caja_recomendado if cierre else ((efectivo|default(0)) - (cierre.efectivo_entregado if cierre else 0))) }}</strong></div>
+				<div class="field-with-icon"><label for="efectivo_dejado_caja_real">Efectivo dejado en caja (Real)</label><div class="canal-control"><img class="canal-icon" src="{{ url_for('static', filename='img/efectivo_dejado_caja.png') }}" alt="Efectivo dejado en caja"><input id="efectivo_dejado_caja_real" type="number" step="0.01" name="efectivo_dejado_caja_real" value="{{ cierre.efectivo_dejado_caja_real if cierre else 0 }}" required></div></div>
+			</div>
+			<div id="diferencia-efectivo-dejado" class="status-pill">Diferencia: {{ '%.2f'|format(cierre.diferencia_efectivo_dejado if cierre else 0) }}</div>
+		</fieldset>
+		<button type="button" class="section-save-hint" disabled>Se guarda con el botón Guardar</button>
+	</form>
+</section>
 
 <div class="card mt-3">
 	<h3>Resumen operativo</h3>
@@ -148,6 +217,7 @@
 				<th>Turno</th>
 				<th>Base</th>
 				<th>Venta sistema</th>
+				<th>Efectivo a entregar</th>
 				<th>Subtotal</th>
 				<th>Fecha</th>
 			</tr>
@@ -160,59 +230,346 @@
 				<td>{{ a.id_turno }}</td>
 				<td>{{ '%.2f'|format(a.monto_inicial or 0) }}</td>
 				<td>{{ '%.2f'|format(a.venta_sistema or 0) }}</td>
+				<td>{{ '%.2f'|format(a.efectivo_a_entregar or 0) }}</td>
 				<td>{{ '%.2f'|format(a.monto_final or 0) }}</td>
 				<td>{{ a.fecha }}</td>
 			</tr>
 			{% else %}
-			<tr><td colspan="7">Sin cierres para esta sede/turno/fecha.</td></tr>
+			<tr><td colspan="8">Sin cierres para esta sede/turno/fecha.</td></tr>
 			{% endfor %}
 		</tbody>
 	</table>
 </div>
 
+<section class="card mt-3">
+	<h3>Historial de auditoría</h3>
+	<div class="inventory-table-wrap">
+		<table id="historial-auditoria-table" class="inventory-table">
+			<thead><tr><th>Fecha</th><th>Usuario</th><th>Tipo</th><th>Campo</th><th>Valor anterior</th><th>Valor nuevo</th></tr></thead>
+			<tbody id="historial-auditoria-body">
+			{% for item in historial_auditoria %}
+			<tr data-log-id="{{ item.id_historial }}"><td>{{ item.fecha_hora }}</td><td>{{ item.usuario_id }}</td><td>{{ item.tipo_evento }}</td><td>{{ item.campo_o_seccion_afectada or item.accion }}</td><td>{{ item.valor_anterior }}</td><td>{{ item.valor_nuevo }}</td></tr>
+			{% else %}
+			<tr class="empty-log-row"><td colspan="6">Sin movimientos auditados.</td></tr>
+			{% endfor %}
+			</tbody>
+		</table>
+	</div>
+</section>
+
+</div>
+
+<div id="arqueo-ticket-preview" aria-hidden="true" style="position:absolute;left:-9999px;top:0;width:460px;padding:20px;background:#fff;border-radius:18px;box-shadow:0 18px 40px rgba(0,0,0,.15);font-family:Arial,sans-serif;color:#1f2937;overflow:visible;">
+	<div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #e5e7eb;padding-bottom:10px;margin-bottom:12px;">
+		<div>
+			<strong style="font-size:22px;display:block;">Comprobante de Arqueo</strong>
+			<div style="font-size:12px;color:#6b7280;">Fecha: {{ selected_date.strftime('%d/%m/%Y') if selected_date else '' }} · Sede: {{ current_user.sede.nombre_sede if current_user.sede else 'Sede' }} · Turno: {{ current_user.turno.nombre_turno if current_user.turno else target_turno_id }}</div>
+			<div style="font-size:12px;color:#6b7280;margin-top:4px;">Usuario responsable: {{ current_user.username }}</div>
+		</div>
+		<img src="{{ url_for('static', filename='img/icono.png') }}" alt="Icono" style="width:42px;height:42px;border-radius:12px;">
+	</div>
+	<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 12px;font-size:12px;">
+		<div style="display:flex;align-items:center;gap:8px;"><img src="{{ url_for('static', filename='img/visa.png') }}" style="width:18px;height:18px;">POS: <strong id="ticket-pos">{{ '%.2f'|format(cierre.pos_tarjetas if cierre else 0) }}</strong></div>
+		<div style="display:flex;align-items:center;gap:8px;"><img src="{{ url_for('static', filename='img/logo-yape.png') }}" style="width:18px;height:18px;">Yape: <strong id="ticket-yape">{{ '%.2f'|format(cierre.yape if cierre else 0) }}</strong></div>
+		<div style="display:flex;align-items:center;gap:8px;"><img src="{{ url_for('static', filename='img/logo-plin.png') }}" style="width:18px;height:18px;">Plin: <strong id="ticket-plin">{{ '%.2f'|format(cierre.plin if cierre else 0) }}</strong></div>
+		<div style="display:flex;align-items:center;gap:8px;"><img src="{{ url_for('static', filename='img/dinero-en-efectivo.png') }}" style="width:18px;height:18px;">Efectivo: <strong id="ticket-efectivo">{{ '%.2f'|format(cierre.efectivo if cierre else 0) }}</strong></div>
+	</div>
+	<div style="margin-top:14px;border-top:1px solid #e5e7eb;padding-top:10px;font-size:12px;">
+		<div style="display:flex;justify-content:space-between;"><span>Monto Base Colocado</span><strong id="ticket-monto-inicial">{{ '%.2f'|format(cierre.monto_inicial if cierre else 0) }}</strong></div>
+		<div style="margin-top:8px;"><strong>Gastos Operativos</strong></div>
+		<div id="ticket-gastos-list" style="margin-top:4px;">
+			{% for gasto in gastos_actuales %}
+			<div style="display:flex;justify-content:space-between;gap:12px;"><span>{{ gasto.tipo|default('Otros') }}: {{ gasto.nombre|default('') }}</span><strong>{{ '%.2f'|format(gasto.monto|default(0)|float) }}</strong></div>
+			{% else %}<div>Sin gastos operativos.</div>{% endfor %}
+		</div>
+	</div>
+	<div style="margin-top:14px;border-top:1px solid #e5e7eb;padding-top:10px;font-size:12px;">
+		<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;"><span>Total Ingresos</span><strong id="ticket-total-ingresos">{{ '%.2f'|format(resumen.total_ingresos if resumen else 0) }}</strong></div>
+		<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;"><span>Gastos Totales</span><strong id="ticket-gastos">{{ '%.2f'|format(resumen.gastos_totales if resumen else 0) }}</strong></div>
+		<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;"><span>Subtotal</span><strong id="ticket-subtotal">{{ '%.2f'|format(resumen.subtotal if resumen else 0) }}</strong></div>
+		<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;"><span>Total Real</span><strong id="ticket-total-real">{{ '%.2f'|format((resumen.subtotal if resumen else 0) - (expected_base|default(0))) }}</strong></div>
+		<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;"><span>Venta POS</span><strong id="ticket-venta-sistema">{{ '%.2f'|format(cierre.venta_sistema if cierre else 0) }}</strong></div>
+		<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;"><span>Efectivo entregado</span><strong id="ticket-efectivo-entregado">{{ '%.2f'|format(cierre.efectivo_entregado if cierre else 0) }}</strong></div>
+		<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;"><span>Efectivo dejado</span><strong id="ticket-efectivo-dejado">{{ '%.2f'|format(cierre.efectivo_dejado_caja_real if cierre else 0) }}</strong></div>
+		<div id="ticket-diferencia" style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;padding-top:8px;border-top:1px dashed #d1d5db;font-weight:700;"><span>Diferencia vs Sistema</span><strong id="ticket-diferencia-valor">{{ '%.2f'|format(resumen.diferencia if resumen else 0) }}</strong></div>
+	</div>
+	<div style="margin-top:12px;padding-top:10px;border-top:1px solid #e5e7eb;font-size:12px;">
+		<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;"><img src="{{ url_for('static', filename='img/efectivo_entregado.png') }}" style="width:18px;height:18px;">Entregado real: <strong>{{ '%.2f'|format(cierre.efectivo_entregado if cierre else 0) }}</strong></div>
+		<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;"><img src="{{ url_for('static', filename='img/efectivo_dejado_caja.png') }}" style="width:18px;height:18px;">Dejado real: <strong>{{ '%.2f'|format(cierre.efectivo_dejado_caja_real if cierre else 0) }}</strong></div>
+		<div id="ticket-observaciones" style="white-space:pre-wrap; word-break:break-word; margin-top:10px; background:#f9fafb; padding:10px; border-radius:10px; min-height:50px;">{{ cierre.observaciones if cierre and cierre.observaciones else 'Sin observaciones.' }}</div>
+	</div>
+	<div style="margin-top:14px;text-align:center;font-size:11px;color:#6b7280;">Usuario responsable: {{ current_user.username }}</div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 <script>
 	(function () {
 		var list = document.getElementById('gastos-list');
+		var expected_base = {{ expected_base if expected_base is defined else 0 }};
 		var addBtn = document.getElementById('add-gasto-btn');
 		var totalIngresosEl = document.getElementById('sum-total-ingresos');
 		var gastosEl = document.getElementById('sum-gastos');
 		var subtotalEl = document.getElementById('sum-subtotal');
 		var totalOperativoEl = document.getElementById('sum-total-operativo');
 		var diferenciaPill = document.getElementById('sum-diferencia-pill');
+		var efectivoDejadoReal = document.getElementById('efectivo_dejado_caja_real');
+		var diferenciaEfectivoDejado = document.getElementById('diferencia-efectivo-dejado');
 		var exportBtn = document.getElementById('arqueo-export-btn');
 		var captureTarget = document.getElementById('arqueo-capture');
+		var saveBtn = document.getElementById('arqueo-save-btn');
+		var saveStatus = document.getElementById('arqueo-save-status');
+		var dirtyFields = new Set();
+		var lockedFields = new Set({{ locked_fields_json|safe }});
+		var ventaSistemaGuardada = {{ 'true' if cierre and cierre.venta_sistema_guardada else 'false' }};
+		var auditEnabled = {{ 'true' if audit_enabled else 'false' }};
+		var efectivoEntregadoGuardado = {{ 'true' if cierre and cierre.efectivo_entregado_guardado else 'false' }};
+		var efectivoDejadoGuardado = {{ 'true' if cierre and cierre.efectivo_dejado_guardado else 'false' }};
+		var isAdminGeneral = {{ 'true' if is_admin_general else 'false' }};
+		var autosaveTimer;
+		if (saveBtn && saveBtn.parentElement !== document.body) {
+			document.body.appendChild(saveBtn);
+		}
 		if (!list || !addBtn) {
 			return;
 		}
+
+		function setStatus(message) {
+			if (saveStatus) saveStatus.textContent = message;
+		}
+
+		function showSuccessToast() {
+			var toast = document.getElementById('cierre-success-toast');
+			if (!toast) return;
+			toast.classList.add('is-visible');
+			window.setTimeout(function () { toast.classList.remove('is-visible'); }, 5000);
+		}
+
+		function renderHistorial(logs) {
+			var body = document.getElementById('historial-auditoria-body');
+			if (!body || !Array.isArray(logs)) return;
+			body.innerHTML = '';
+			if (!logs.length) {
+				body.innerHTML = '<tr class="empty-log-row"><td colspan="6">Sin movimientos auditados.</td></tr>';
+				return;
+			}
+			logs.forEach(function (log) {
+				var row = document.createElement('tr');
+				row.dataset.logId = log.id || '';
+				[log.fecha_hora, log.usuario_id, log.tipo_evento, log.campo, log.valor_anterior, log.valor_nuevo].forEach(function (value) {
+					var cell = document.createElement('td');
+					cell.textContent = value == null ? '' : String(value);
+					row.appendChild(cell);
+				});
+				body.appendChild(row);
+			});
+		}
+
+		function setFieldLocked(name) {
+			if (isAdminGeneral) return;
+			lockedFields.add(name);
+			document.querySelectorAll('[name="' + name + '"]').forEach(function (element) {
+				element.disabled = true;
+				element.classList.add('field-locked');
+			});
+		}
+
+		function lockSavedFields(fields) {
+			if (isAdminGeneral) {
+				document.querySelectorAll('input, select, textarea, button').forEach(function (element) {
+					if (!element.classList.contains('arqueo-save-sticky') && !element.classList.contains('section-save-hint')) element.disabled = false;
+				});
+			} else {
+				(fields || []).forEach(setFieldLocked);
+				if (ventaSistemaGuardada) {
+					list.querySelectorAll('input, select, button.remove-gasto').forEach(function (element) {
+						element.disabled = true;
+						element.classList.add('field-locked');
+					});
+					addBtn.disabled = true;
+				}
+			}
+			var auditSection = document.querySelector('[name="section"][value="efectivo_entregado"]');
+			if (auditSection) {
+				var auditForm = auditSection.closest('form');
+				var auditCard = auditForm ? auditForm.closest('.cierre-section') : null;
+				if (auditForm) auditForm.querySelectorAll('fieldset, button').forEach(function (element) { element.disabled = !auditEnabled || (!isAdminGeneral && lockedFields.has('efectivo_entregado')); });
+				if (auditCard) auditCard.classList.toggle('is-locked', !auditEnabled && !isAdminGeneral);
+			}
+			var leftSection = document.querySelector('[name="section"][value="efectivo_dejado"]');
+			if (leftSection) {
+				var leftForm = leftSection.closest('form');
+				var leftCard = leftForm ? leftForm.closest('.cierre-section') : null;
+				if (leftForm) leftForm.querySelectorAll('fieldset, button').forEach(function (element) { element.disabled = !efectivoEntregadoGuardado || efectivoDejadoGuardado; });
+				if (leftCard) leftCard.classList.toggle('is-locked', !efectivoEntregadoGuardado && !isAdminGeneral);
+			}
+		}
+
+		function lockSavedGastos() {
+			if (ventaSistemaGuardada) return;
+			list.querySelectorAll('.gasto-item').forEach(function (row) {
+				var amount = row.querySelector('[name="gasto_monto[]"]');
+				if (amount && toNum(amount.value) > 0) {
+					row.classList.add('is-locked');
+					row.querySelectorAll('input, select, button.remove-gasto').forEach(function (element) {
+						element.disabled = true;
+					});
+				}
+			});
+		}
+
+		function collectChangedFields() {
+			var fields = {};
+			dirtyFields.forEach(function (name) {
+				if (name === 'gastos') {
+					fields.gastos = Array.from(list.querySelectorAll('.gasto-item')).map(function (row, index) {
+						var type = row.querySelector('[name="gasto_tipo[]"]');
+						var detail = row.querySelector('[name="gasto_nombre[]"]');
+						var amount = row.querySelector('[name="gasto_monto[]"]');
+						return { id: row.dataset.gastoId || ('gasto-' + index), tipo: type ? type.value : 'Otros', nombre: detail ? detail.value : '', monto: amount ? amount.value : '' };
+					});
+					return;
+				}
+				var element = document.querySelector('[name="' + name + '"]');
+				if (element && !element.disabled) fields[name] = element.value;
+			});
+			return fields;
+		}
+
+		function saveChanged(eventName) {
+			var fields = collectChangedFields();
+			if (!Object.keys(fields).length) {
+				setStatus('No hay cambios pendientes.');
+				return Promise.resolve();
+			}
+			if (saveBtn) saveBtn.disabled = true;
+			setStatus(eventName === 'AUTOGUARDADO_5MIN' ? 'Autoguardando...' : 'Guardando...');
+			return fetch('{{ url_for("arqueo", sede=target_sede_id, turno=target_turno_id) }}', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+				body: JSON.stringify({ section: 'partial', event: eventName, fields: fields })
+			}).then(function (response) {
+				if (!response.ok) throw new Error('HTTP ' + response.status);
+				return response.json();
+			}).then(function (data) {
+				ventaSistemaGuardada = Boolean(data.venta_sistema_guardada);
+				auditEnabled = Boolean(data.audit_enabled);
+				efectivoEntregadoGuardado = Boolean(data.efectivo_entregado_guardado);
+				efectivoDejadoGuardado = Boolean(data.efectivo_dejado_guardado);
+				lockSavedFields(data.locked_fields);
+				lockSavedGastos();
+				renderHistorial(data.logs);
+				dirtyFields.clear();
+				setStatus(data.message || 'Guardado correctamente.');
+				if (Object.prototype.hasOwnProperty.call(fields, 'efectivo_dejado_caja_real') || data.closure_complete) showSuccessToast();
+			}).catch(function () {
+				setStatus('No se pudo guardar. Revisa la conexión e inténtalo nuevamente.');
+			}).finally(function () {
+				if (saveBtn) saveBtn.disabled = false;
+			});
+		}
+
+		function markDirty(name) {
+			if (!lockedFields.has(name)) dirtyFields.add(name);
+			clearTimeout(autosaveTimer);
+			autosaveTimer = setTimeout(function () { saveChanged('AUTOGUARDADO_5MIN'); }, 300000);
+		}
+
+		document.querySelectorAll('input, select, textarea').forEach(function (element) {
+			if (element.name && element.name !== 'section' && element.name !== 'gasto_tipo[]' && element.name !== 'gasto_nombre[]' && element.name !== 'gasto_monto[]') {
+				element.addEventListener('input', function () { markDirty(element.name); });
+			}
+			if (element.name && element.closest('#gastos-list')) {
+				element.addEventListener('input', function () { markDirty('gastos'); });
+				element.addEventListener('change', function () { markDirty('gastos'); });
+			}
+		});
+		if (saveBtn) saveBtn.addEventListener('click', function () { saveChanged('GUARDADO_MANUAL'); });
+		lockSavedFields(Array.from(lockedFields));
 
 		function buildExportName() {
 			var now = new Date();
 			var yyyy = String(now.getFullYear());
 			var mm = String(now.getMonth() + 1).padStart(2, '0');
 			var dd = String(now.getDate()).padStart(2, '0');
-			return 'arqueo_' + yyyy + mm + dd + '.png';
+				return 'reporte_arqueo_' + yyyy + mm + dd + '.png';
 		}
 
 		function exportArqueoImage() {
-			if (!exportBtn || !captureTarget || typeof html2canvas !== 'function') {
+			if (!exportBtn || typeof html2canvas !== 'function') {
 				return;
 			}
 			exportBtn.disabled = true;
 			exportBtn.textContent = 'Generando...';
-			html2canvas(captureTarget, {
-				backgroundColor: '#f4f4f4',
-				scale: 2,
-			}).then(function (canvas) {
+			var ticket = document.getElementById('arqueo-ticket-preview');
+			if (!ticket) { exportBtn.disabled = false; exportBtn.textContent = 'Descargar Arqueo en Imagen (PNG/JPG)'; return; }
+			var todayDate = '{{ selected_date.strftime("%d/%m/%Y") if selected_date else "" }}';
+			var pos = Number(document.querySelector('input[name="pos_tarjetas"]')?.value || 0);
+			var yape = Number(document.querySelector('input[name="yape"]')?.value || 0);
+			var plin = Number(document.querySelector('input[name="plin"]')?.value || 0);
+			var efectivo = Number(document.querySelector('input[name="efectivo"]')?.value || 0);
+			var ventaSistema = Number(document.querySelector('input[name="venta_sistema"]')?.value || 0);
+			var entregado = Number(document.querySelector('input[name="efectivo_entregado"]')?.value || 0);
+			var dejado = Number(document.querySelector('input[name="efectivo_dejado_caja_real"]')?.value || 0);
+			var montoInicial = Number(document.querySelector('input[name="monto_inicial"]')?.value || 0);
+			var gastos = Number(document.querySelector('#sum-gastos')?.textContent || 0);
+			var totalIngresos = Number(document.querySelector('#sum-total-ingresos')?.textContent || 0);
+			var total = Number(document.querySelector('#sum-subtotal')?.textContent || 0);
+			var totalReal = total - Number(expected_base || 0);
+			var diferencia = totalReal - ventaSistema;
+			updateSummary();
+			totalIngresos = Number(document.querySelector('#sum-total-ingresos')?.textContent || totalIngresos);
+			total = Number(document.querySelector('#sum-subtotal')?.textContent || total);
+			totalReal = total - Number(expected_base || 0);
+			diferencia = totalReal - ventaSistema;
+			ticket.querySelector('#ticket-pos').textContent = pos.toFixed(2);
+			ticket.querySelector('#ticket-yape').textContent = yape.toFixed(2);
+			ticket.querySelector('#ticket-plin').textContent = plin.toFixed(2);
+			ticket.querySelector('#ticket-efectivo').textContent = efectivo.toFixed(2);
+			ticket.querySelector('#ticket-monto-inicial').textContent = montoInicial.toFixed(2);
+			ticket.querySelector('#ticket-total-ingresos').textContent = totalIngresos.toFixed(2);
+			ticket.querySelector('#ticket-venta-sistema').textContent = ventaSistema.toFixed(2);
+			ticket.querySelector('#ticket-efectivo-entregado').textContent = entregado.toFixed(2);
+			ticket.querySelector('#ticket-efectivo-dejado').textContent = dejado.toFixed(2);
+			ticket.querySelector('#ticket-gastos').textContent = gastos.toFixed(2);
+			ticket.querySelector('#ticket-subtotal').textContent = total.toFixed(2);
+			ticket.querySelector('#ticket-total-real').textContent = totalReal.toFixed(2);
+			ticket.querySelector('#ticket-diferencia-valor').textContent = diferencia.toFixed(2);
+			ticket.querySelector('#ticket-diferencia').style.color = diferencia < 0 ? '#b91c1c' : '#166534';
+			var ticketExpenses = ticket.querySelector('#ticket-gastos-list');
+			if (ticketExpenses) {
+				ticketExpenses.replaceChildren();
+				var expenseRows = list.querySelectorAll('.gasto-item');
+				if (!expenseRows.length) {
+					ticketExpenses.textContent = 'Sin gastos operativos.';
+				} else {
+					expenseRows.forEach(function (row) {
+						var type = row.querySelector('[name="gasto_tipo[]"]');
+						var detail = row.querySelector('[name="gasto_nombre[]"]');
+						var amount = row.querySelector('[name="gasto_monto[]"]');
+						var line = document.createElement('div');
+						line.style.cssText = 'display:flex;justify-content:space-between;gap:12px;';
+						var label = document.createElement('span');
+						label.textContent = (type ? type.value : 'Otros') + ': ' + (detail ? detail.value : '');
+						var value = document.createElement('strong');
+						value.textContent = toNum(amount ? amount.value : 0).toFixed(2);
+						line.append(label, value);
+						ticketExpenses.appendChild(line);
+					});
+				}
+			}
+			var observations = document.querySelector('textarea[name="observaciones"]');
+			var ticketObservations = ticket.querySelector('#ticket-observaciones');
+			if (ticketObservations) ticketObservations.textContent = observations && observations.value.trim() ? observations.value.trim() : 'Sin observaciones.';
+			html2canvas(ticket, { backgroundColor: '#ffffff', scale: 2, useCORS: true }).then(function (canvas) {
 				var link = document.createElement('a');
-				link.download = buildExportName();
+				link.download = 'arqueo_diario_' + '{{ selected_date.strftime("%Y%m%d") if selected_date else "hoy" }}' + '.png';
 				link.href = canvas.toDataURL('image/png');
 				link.click();
+			}).catch(function () {
+				alert('No se pudo generar la imagen del arqueo.');
 			}).finally(function () {
 				exportBtn.disabled = false;
-				exportBtn.textContent = 'Descargar imagen';
+				exportBtn.textContent = 'Descargar Arqueo en Imagen (PNG/JPG)';
 			});
 		}
 
@@ -239,7 +596,7 @@
 			});
 
 			var totalIngresos = pos + yape + plin + efectivo;
-			var subtotal = totalIngresos + totalGastos;
+			var subtotal = totalIngresos - totalGastos;
 			var totalOperativo = subtotal - montoInicial;
 			var diferencia = (subtotal - montoInicial) - ventaSistema;
 
@@ -247,6 +604,18 @@
 			if (gastosEl) gastosEl.textContent = totalGastos.toFixed(2);
 			if (subtotalEl) subtotalEl.textContent = subtotal.toFixed(2);
 			if (totalOperativoEl) totalOperativoEl.textContent = totalOperativo.toFixed(2);
+			var ticketTotalIngresos = document.getElementById('ticket-total-ingresos');
+			var ticketGastos = document.getElementById('ticket-gastos');
+			var ticketSubtotal = document.getElementById('ticket-subtotal');
+			var ticketTotalReal = document.getElementById('ticket-total-real');
+			var ticketDifference = document.getElementById('ticket-diferencia');
+			var ticketDifferenceValue = document.getElementById('ticket-diferencia-valor');
+			if (ticketTotalIngresos) ticketTotalIngresos.textContent = totalIngresos.toFixed(2);
+			if (ticketGastos) ticketGastos.textContent = totalGastos.toFixed(2);
+			if (ticketSubtotal) ticketSubtotal.textContent = subtotal.toFixed(2);
+			if (ticketTotalReal) ticketTotalReal.textContent = (subtotal - Number(expected_base || 0)).toFixed(2);
+			if (ticketDifferenceValue) ticketDifferenceValue.textContent = ((subtotal - Number(expected_base || 0)) - ventaSistema).toFixed(2);
+			if (ticketDifference) ticketDifference.style.color = ((subtotal - Number(expected_base || 0)) - ventaSistema) < 0 ? '#b91c1c' : '#166534';
 
 			if (diferenciaPill) {
 				diferenciaPill.classList.remove('ok', 'error');
@@ -259,6 +628,20 @@
 				} else {
 					diferenciaPill.textContent = 'Cuadre exacto 0.00';
 				}
+			}
+
+			var recomendado = efectivo - Number(expected_base || 0);
+			var recEl = document.getElementById('recomendado-efectivo');
+			if (recEl) recEl.textContent = recomendado.toFixed(2);
+			var efectivoEntregado = toNum(document.querySelector('input[name="efectivo_entregado"]') && document.querySelector('input[name="efectivo_entregado"]').value);
+			var dejadoRecomendado = efectivo - efectivoEntregado;
+			var dejadoEl = document.getElementById('efectivo-dejado-recomendado');
+			if (dejadoEl) dejadoEl.textContent = dejadoRecomendado.toFixed(2);
+			if (efectivoDejadoReal && diferenciaEfectivoDejado) {
+				var diferenciaDejado = toNum(efectivoDejadoReal.value) - dejadoRecomendado;
+				diferenciaEfectivoDejado.textContent = 'Diferencia: ' + diferenciaDejado.toFixed(2);
+				efectivoDejadoReal.classList.toggle('field-ok', Math.abs(diferenciaDejado) < 0.005);
+				efectivoDejadoReal.classList.toggle('field-error', Math.abs(diferenciaDejado) >= 0.005);
 			}
 		}
 
@@ -284,8 +667,13 @@
 			var row = document.createElement('div');
 			row.className = 'gasto-item';
 			row.innerHTML = '' +
+				'<select name="gasto_tipo[]" required>' +
+				'<option value="Otros">Otros</option><option value="Productos de cocina faltantes">Productos de cocina faltantes</option>' +
+				'<option value="Productos de sala faltantes">Productos de sala faltantes</option><option value="Comida">Comida</option>' +
+				'<option value="Propina">Propina</option><option value="Marketing">Marketing</option><option value="Almacén">Almacén</option>' +
+				'</select>' +
 				'<input type="text" name="gasto_nombre[]" placeholder="Nombre del gasto">' +
-				'<input type="number" step="0.01" name="gasto_monto[]" placeholder="Monto">' +
+				'<input type="number" step="0.01" name="gasto_monto[]" placeholder="Monto" required>' +
 				'<button type="button" class="btn-danger remove-gasto">Eliminar</button>';
 			list.appendChild(row);
 			bindRemove(row);
@@ -293,9 +681,17 @@
 		});
 
 		document.querySelectorAll(
-			'input[name="monto_inicial"], input[name="venta_sistema"], input[name="pos_tarjetas"], input[name="yape"], input[name="plin"], input[name="efectivo"]'
+			'input[name="monto_inicial"], input[name="venta_sistema"], input[name="pos_tarjetas"], input[name="yape"], input[name="plin"], input[name="efectivo"], input[name="efectivo_entregado"], input[name="efectivo_dejado_caja_real"]'
 		).forEach(function (input) {
 			input.addEventListener('input', updateSummary);
+		});
+
+		list.addEventListener('change', function (event) {
+			if (event.target && event.target.name === 'gasto_tipo[]') {
+				Array.from(list.querySelectorAll('.gasto-item')).sort(function (left, right) {
+					return (left.querySelector('select').value || '').localeCompare(right.querySelector('select').value || '');
+				}).forEach(function (row) { list.appendChild(row); });
+			}
 		});
 
 		list.addEventListener('input', function (event) {
@@ -305,6 +701,7 @@
 		});
 
 		bindRemove(document);
+		lockSavedGastos();
 		updateSummary();
 	})();
 </script>

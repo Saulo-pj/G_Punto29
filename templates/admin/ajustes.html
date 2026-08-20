@@ -3,21 +3,36 @@
 {% block content %}
 <h1>Ajustes del sistema</h1>
 
-<div class="grid-2">
-	<section>
-		<h3>Nueva sede</h3>
-		<form method="POST">
-			<input type="hidden" name="tipo_form" value="sede">
-			<input type="text" name="nombre_sede" placeholder="Nombre sede" required>
-			<button type="submit">Guardar sede</button>
-		</form>
-	</section>
+<style>
+	.settings-edit-row:target {
+		display: table-row !important;
+	}
+</style>
 
-	<section>
-		<h3>Nota</h3>
-		<p>La gestion de productos se realiza desde Inventario.</p>
-	</section>
-</div>
+
+<section class="card">
+	<div class="catalog-head"><div><h3>Sedes registradas</h3><p class="muted">Las sedes no tienen un campo de estado en la base actual; se muestran como Activas. La eliminacion queda bloqueada si tiene datos asociados.</p></div></div>
+	<form method="POST" class="inline-form">
+		<input type="hidden" name="tipo_form" value="sede">
+		<input type="text" name="nombre_sede" placeholder="Nombre de la nueva sede" required>
+		<button type="submit">Crear sede</button>
+	</form>
+	<div class="inventory-table-wrap mt-3">
+		<table class="inventory-table">
+			<thead><tr><th>ID</th><th>Nombre</th><th>Estado</th><th>Acciones</th></tr></thead>
+			<tbody>
+			{% for s in sedes %}
+			<tr>
+				<td>{{ s.id_sede }}</td><td>{{ s.nombre_sede }}</td><td><span class="status-pill ok">Activa</span></td>
+				<td><a class="icon-action icon-edit" href="#edit-sede-{{ s.id_sede }}" title="Editar sede" aria-label="Editar sede"></a>
+				<form method="POST" class="mini-form" style="display:inline" onsubmit="return confirm('Eliminar esta sede? Solo es posible si no tiene datos asociados.');"><input type="hidden" name="tipo_form" value="delete_sede"><input type="hidden" name="id_sede" value="{{ s.id_sede }}"><button type="submit" class="btn-danger">Eliminar</button></form></td>
+			</tr>
+			<tr id="edit-sede-{{ s.id_sede }}" class="settings-edit-row is-hidden"><td colspan="4"><form method="POST" class="inline-form"><input type="hidden" name="tipo_form" value="update_sede"><input type="hidden" name="id_sede" value="{{ s.id_sede }}"><label>Editar nombre</label><input type="text" name="nombre_sede" value="{{ s.nombre_sede }}" required><button type="submit">Guardar nombre</button><a class="btn-outline" href="#">Cancelar</a></form></td></tr>
+			{% else %}<tr><td colspan="4">No hay sedes registradas.</td></tr>{% endfor %}
+			</tbody>
+		</table>
+	</div>
+</section>
 
 <section>
 	<h3>Nuevo usuario</h3>
@@ -25,7 +40,7 @@
 		<input type="hidden" name="tipo_form" value="usuario">
 		<input type="text" name="id_usuario" placeholder="ID usuario" required>
 		<input type="text" name="username" placeholder="Username" required>
-		<input type="password" name="password" placeholder="Password temporal" required>
+		<input type="password" name="password" placeholder="Password temporal">
 		<select name="id_rol" required>
 			{% for r in roles %}
 			<option value="{{ r.id_rol }}">{{ r.nombre_rol }}</option>
@@ -46,36 +61,65 @@
 </section>
 
 <section>
+	<h3>Monto inicial base esperado por Sede</h3>
+	<p class="muted">Este valor lo define el Admin General y se usa como referencia en el arqueo.</p>
+	<div class="inventory-table-wrap"><table class="inventory-table"><thead><tr><th>ID</th><th>Sede</th><th>Monto Base Esperado</th><th>Accion</th></tr></thead><tbody>
+	{% for s in sedes %}<tr><td>{{ s.id_sede }}</td><td>{{ s.nombre_sede }}</td><td><form method="POST" class="inline-form"><input type="hidden" name="tipo_form" value="sede_base"><input type="hidden" name="id_sede" value="{{ s.id_sede }}"><input type="number" step="0.01" min="0" name="monto_inicial_base_esperado" value="{{ '%.2f'|format(s.monto_inicial_base_esperado|default(0)|float) }}" required><button type="submit">Actualizar</button></form></td><td>Vigente</td></tr>{% else %}<tr><td colspan="4">No hay sedes registradas.</td></tr>{% endfor %}
+	</tbody></table></div>
+</section>
+
+<section>
+	<h3>Recordatorio de cierre de caja</h3>
+	<p class="muted">Configura la hora de aviso por sede y turno. El navegador debe permitir notificaciones.</p>
+	<form method="POST" class="inline-form">
+		<input type="hidden" name="tipo_form" value="recordatorio_cierre">
+		<select name="id_sede" required>
+			{% for s in sedes %}<option value="{{ s.id_sede }}">{{ s.nombre_sede }}</option>{% endfor %}
+		</select>
+		<select name="id_turno" required>
+			{% for t in turnos %}<option value="{{ t.id_turno }}">{{ t.nombre_turno }}</option>{% endfor %}
+		</select>
+		<input type="time" name="hora_cierre" value="23:00" required>
+		<label><input type="checkbox" name="activo" checked> Activo</label>
+		<button type="submit">Guardar horario</button>
+	</form>
+	<div class="inventory-table-wrap mt-3">
+		<table class="inventory-table">
+			<thead><tr><th>ID</th><th>Sede</th><th>Turno</th><th>Hora</th><th>Estado</th><th>Acciones</th></tr></thead>
+			<tbody>
+			{% for r in recordatorios %}
+			<tr><td>{{ r.id_recordatorio }}</td><td>{{ sede_names.get(r.id_sede, r.id_sede) }}</td><td>{{ turno_names.get(r.id_turno, r.id_turno) }}</td><td>{{ r.hora_cierre }}</td><td><span class="status-pill {{ 'ok' if r.activo else 'error' }}">{{ 'Activo' if r.activo else 'Inactivo' }}</span></td><td><a class="icon-action icon-edit" href="#edit-reminder-{{ r.id_recordatorio }}" title="Editar recordatorio" aria-label="Editar recordatorio"></a><form method="POST" class="mini-form" style="display:inline" onsubmit="return confirm('Eliminar este recordatorio?');"><input type="hidden" name="tipo_form" value="delete_recordatorio"><input type="hidden" name="id_recordatorio" value="{{ r.id_recordatorio }}"><button type="submit" class="btn-danger">Eliminar</button></form></td></tr>
+			<tr id="edit-reminder-{{ r.id_recordatorio }}" class="settings-edit-row is-hidden"><td colspan="6"><form method="POST" class="inline-form"><input type="hidden" name="tipo_form" value="update_recordatorio"><input type="hidden" name="id_recordatorio" value="{{ r.id_recordatorio }}"><label>Editar turno</label><select name="id_turno" required>{% for t in turnos %}<option value="{{ t.id_turno }}" {% if t.id_turno == r.id_turno %}selected{% endif %}>{{ t.nombre_turno }}</option>{% endfor %}</select><label>Editar hora</label><input type="time" name="hora_cierre" value="{{ r.hora_cierre }}" required><label><input type="checkbox" name="activo" {% if r.activo %}checked{% endif %}> Activo</label><button type="submit">Guardar cambios</button><a class="btn-outline" href="#">Cancelar</a></form></td></tr>
+			{% else %}<tr><td colspan="6">Sin horarios configurados.</td></tr>{% endfor %}
+			</tbody>
+		</table>
+	</div>
+</section>
+
+<section>
 		<h3>Gestionar usuarios</h3>
-		<p class="muted">Puedes editar ID, username y password. Deja password vacio si no deseas cambiarla.</p>
-		<div class="user-admin-list">
+		<p class="muted">Todos los datos actuales son visibles. La password es opcional al editar.</p>
+		<div class="inventory-table-wrap">
+		<table class="inventory-table">
+		<thead><tr><th>ID</th><th>Username</th><th>Rol</th><th>Sede asignada</th><th>Turno asignado</th><th>Estado</th><th>Acciones</th></tr></thead>
+		<tbody>
 			{% for u in usuarios %}
-			<div class="user-admin-item">
-				<div class="user-admin-row">
-					<span class="user-admin-name">{{ u.username }}</span>
-					<div class="user-admin-actions">
-						<button type="button" class="icon-action icon-edit" data-target="edit-user-{{ u.id_usuario|replace(' ', '_') }}" title="Editar usuario" aria-label="Editar usuario"></button>
-						<form method="POST" onsubmit="return confirm('Estas seguro de eliminar este usuario?');" class="user-delete-form">
-							<input type="hidden" name="tipo_form" value="delete_usuario">
-							<input type="hidden" name="id_usuario" value="{{ u.id_usuario }}">
-							<button type="submit" class="icon-action icon-delete" title="Eliminar usuario" aria-label="Eliminar usuario">&#128465;</button>
-						</form>
-					</div>
-				</div>
-				<form method="POST" id="edit-user-{{ u.id_usuario|replace(' ', '_') }}" class="user-edit-form is-hidden">
+			<tr><td>{{ u.id_usuario }}</td><td>{{ u.username }}</td><td>{{ u.rol_nombre or '-' }}</td><td>{{ u.sede.nombre_sede if u.sede else 'Sin sede' }}</td><td>{{ u.turno.nombre_turno if u.turno else 'Sin turno' }}</td><td><span class="status-pill ok">Activo</span></td><td><a class="icon-action icon-edit" href="#edit-user-{{ u.id_usuario|replace(' ', '_') }}" title="Editar usuario" aria-label="Editar usuario"></a><form method="POST" onsubmit="return confirm('Estas seguro de eliminar este usuario?');" class="mini-form" style="display:inline"><input type="hidden" name="tipo_form" value="delete_usuario"><input type="hidden" name="id_usuario" value="{{ u.id_usuario }}"><button type="submit" class="btn-danger">Eliminar</button></form></td></tr>
+			<tr id="edit-user-{{ u.id_usuario|replace(' ', '_') }}" class="settings-edit-row is-hidden"><td colspan="7"><form method="POST" class="grid-2">
 					<input type="hidden" name="tipo_form" value="update_usuario">
 					<input type="hidden" name="old_id_usuario" value="{{ u.id_usuario }}">
 					<input type="text" name="id_usuario" value="{{ u.id_usuario }}" required>
 					<input type="text" name="username" value="{{ u.username }}" required>
 					<input type="password" name="password" placeholder="Nueva password (opcional)">
-					<div class="muted">Rol actual: {{ u.rol_nombre }}</div>
+					<select name="id_rol" required>{% for r in roles %}<option value="{{ r.id_rol }}" {% if u.id_rol == r.id_rol %}selected{% endif %}>{{ r.nombre_rol }}</option>{% endfor %}</select>
+					<select name="id_sede" required>{% for s in sedes %}<option value="{{ s.id_sede }}" {% if u.id_sede == s.id_sede %}selected{% endif %}>{{ s.nombre_sede }}</option>{% endfor %}</select>
+					<select name="id_turno" required>{% for t in turnos %}<option value="{{ t.id_turno }}" {% if u.id_turno == t.id_turno %}selected{% endif %}>{{ t.nombre_turno }}</option>{% endfor %}</select>
 					<button type="submit">Guardar cambios</button>
-				</form>
-			</div>
+				</form></td></tr>
 			{% else %}
-			<p class="muted">Sin usuarios</p>
+			<tr><td colspan="7">Sin usuarios</td></tr>
 			{% endfor %}
-		</div>
+		</tbody></table></div>
 </section>
 
 {% endblock %}

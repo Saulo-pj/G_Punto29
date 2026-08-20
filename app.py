@@ -3,9 +3,10 @@ import importlib
 import json
 import re
 from io import BytesIO
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from collections import defaultdict
-from flask import Flask, flash, redirect, render_template, request, send_file, send_from_directory, url_for, session
+from flask import Flask, flash, jsonify, redirect, render_template, request, send_file, send_from_directory, url_for, session
 from flask_login import LoginManager, current_user, login_required, login_user, logout_user
 from dotenv import load_dotenv
 from sqlalchemy import or_
@@ -13,15 +14,45 @@ from sqlalchemy import inspect, text
 from sqlalchemy.exc import IntegrityError
 from werkzeug.security import check_password_hash, generate_password_hash
 from openpyxl import Workbook
+from openpyxl.chart import BarChart, Reference
+from openpyxl.formatting.rule import CellIsRule
+from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.worksheet.table import Table, TableStyleInfo
 
 from database import (
-	ArqueoCaja,
+	db,
+	Sede,
+	Rol,
+	Turno,
+	RecordatorioCierre,
+	Categoria,
+	Unidad,
+	Area,
+	Subarea,
+	Usuario,
+	Producto,
+	InventarioSede,
 	ChecklistPedido,
-	)
+	DetallePedido,
+	PlantillaChecklistItem,
+	MovimientoInventario,
+	ArqueoCaja,
+	ArqueoCajaHistorial,
+	Merma,
+	Incidencia,
+	CatalogoMerma,
+	AgendaAuditoria,
+	AgendaPersistencia,
+)
 
 # Inicializar LoginManager global para decoradores y uso antes de create_app
 login_manager = LoginManager()
 login_manager.login_view = 'login'
+
+DEFAULT_AREAS = {
+	'cocina': ['cocina_caliente', 'cocina_fria'],
+	'sala': ['sala'],
+}
 
 
 def _get_operation_date():
@@ -43,6 +74,24 @@ def _get_selected_app_date():
         return operation_date
 
 
+def _format_peru_datetime(value):
+    if value is None:
+        return ''
+    if isinstance(value, datetime):
+        dt = value
+    elif isinstance(value, date):
+        dt = datetime.combine(value, datetime.min.time())
+    else:
+        try:
+            dt = datetime.fromisoformat(str(value))
+        except ValueError:
+            return str(value)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    peru_tz = ZoneInfo('America/Lima')
+    return dt.astimezone(peru_tz).strftime('%d/%m/%Y %H:%M')
+
+
 def _allowed_views(user):
 	view_order = [
 		('dashboard', 'Inicio'),
@@ -51,6 +100,9 @@ def _allowed_views(user):
 		('pedidos', 'Pedidos'),
 		('checklist', 'Checklist'),
 		('arqueo', 'Arqueo Caja'),
+		('mermas', 'Mermas'),
+		('incidencias', 'Incidencias'),
+		('horarios', 'Gestion de Personal y Horarios'),
 		('ajustes', 'Ajustes'),
 	]
 	allowed = [item for item in view_order if user.can_view(item[0])]
@@ -69,8 +121,9 @@ def _seed_catalogs():
 		for name in ['admin_general', 'admin_almacen', 'personal_prod', 'admin_sala', 'cocinero']:
 			db.session.add(Rol(nombre_rol=name))
 
-	if Sede.query.count() == 0:
-		db.session.add(Sede(nombre_sede='Almacen'))
+	for default_sede in ('Almacen', 'Sede_17', 'Sede_20'):
+		if not Sede.query.filter(db.func.lower(Sede.nombre_sede) == default_sede.lower()).first():
+			db.session.add(Sede(nombre_sede=default_sede))
 
 	if Turno.query.count() == 0:
 		for code, name in [('MANANA', 'Manana'), ('NOCHE', 'Noche'), ('NA', 'N/A')]:
@@ -136,190 +189,153 @@ def _forbidden_redirect():
 	return redirect(url_for('dashboard'))
 
 
+def _safe_json_list(value):
+	if value in (None, '', 'null'):
+		return []
+	try:
+		payload = json.loads(value)
+		return payload if isinstance(payload, list) else []
+	except (TypeError, ValueError):
+		return []
+
+
 def _stats_for_user(user):
-	stats = {
-		'productos': Producto.query.count(),
-		'movimientos': MovimientoInventario.query.count(),
-		'pedidos': ChecklistPedido.query.count(),
-		'arqueos': ArqueoCaja.query.count(),
-	}
-	return stats
+	try:
+		stats = {
+			'productos': Producto.query.count(),
+			'movimientos': MovimientoInventario.query.count(),
+			'pedidos': ChecklistPedido.query.count(),
+			'arqueos': ArqueoCaja.query.count(),
+		}
+		return stats
+	except Exception:
+		return {'productos': 0, 'movimientos': 0, 'pedidos': 0, 'arqueos': 0}
 
 
 def _home_alerts_for_user(user, selected_date):
-	date_str = selected_date.strftime('%Y-%m-%d')
-	alerts = {
-		'stock_critico_count': 0,
-		'pedidos_pendientes_count': 0,
-		'missing_arqueo': False,
-		'subtitle': 'Resumen de tareas para hoy segun tu rol.',
-		'cards': [],
-	}
+	try:
+		date_str = selected_date.strftime('%Y-%m-%d') if selected_date else datetime.utcnow().strftime('%Y-%m-%d')
+		alerts = {
+			'stock_critico_count': 0,
+			'pedidos_pendientes_count': 0,
+			'missing_arqueo': False,
+			'subtitle': 'Resumen de tareas para hoy segun tu rol.',
+			'cards': [],
+		}
 
-	stock_query = InventarioSede.query
-	if user.rol_nombre != 'admin_general':
-		stock_query = stock_query.filter(InventarioSede.id_sede == user.id_sede)
-	alerts['stock_critico_count'] = stock_query.filter(
-		InventarioSede.punto_minimo > 0,
-		InventarioSede.stock_actual <= InventarioSede.punto_minimo,
-	).count()
-
-	if user.can_view('pedidos'):
-		pedidos_query = ChecklistPedido.query.filter(
-			db.func.date(ChecklistPedido.fecha) == date_str,
-			ChecklistPedido.estado_general == 'Pendiente',
-		)
-		if user.rol_nombre not in {'admin_general', 'admin_almacen', 'personal_prod'}:
-			pedidos_query = pedidos_query.filter(ChecklistPedido.id_sede == user.id_sede)
-		alerts['pedidos_pendientes_count'] = pedidos_query.count()
-
-	if user.can_view('arqueo'):
-		arqueo_query = ArqueoCaja.query.filter(ArqueoCaja.fecha == selected_date)
-		if user.rol_nombre != 'admin_general':
-			arqueo_query = arqueo_query.filter(
-				ArqueoCaja.id_sede == user.id_sede,
-				ArqueoCaja.id_turno == user.id_turno,
-			)
-		alerts['missing_arqueo'] = arqueo_query.count() == 0
-
-	role_name = user.rol_nombre
-
-	if role_name == 'admin_general':
-		alerts['subtitle'] = 'Vision global: pendientes de todo el equipo.'
-		checklists_pendientes = ChecklistPedido.query.filter(
-			db.func.date(ChecklistPedido.fecha) == date_str,
-			ChecklistPedido.estado_general.in_(['Borrador', 'Pendiente']),
+		stock_query = InventarioSede.query
+		if user and user.rol_nombre != 'admin_general':
+			stock_query = stock_query.filter(InventarioSede.id_sede == user.id_sede)
+		alerts['stock_critico_count'] = stock_query.filter(
+			InventarioSede.punto_minimo > 0,
+			InventarioSede.stock_actual <= InventarioSede.punto_minimo,
 		).count()
-		admin_sala_scopes = db.session.query(Usuario.id_sede, Usuario.id_turno).join(
-			Rol, Rol.id_rol == Usuario.id_rol
-		).filter(
-			Rol.nombre_rol == 'admin_sala'
-		).distinct().all()
-		missing_arqueos_count = 0
-		for scope in admin_sala_scopes:
-			if ArqueoCaja.query.filter_by(
-				fecha=selected_date,
-				id_sede=scope.id_sede,
-				id_turno=scope.id_turno,
-			).first() is None:
-				missing_arqueos_count += 1
+
+		if user and user.can_view('pedidos'):
+			pedidos_query = ChecklistPedido.query.filter(
+				db.func.date(ChecklistPedido.fecha) == date_str,
+				ChecklistPedido.estado_general == 'Pendiente',
+			)
+			if user.rol_nombre not in {'admin_general', 'admin_almacen', 'personal_prod'}:
+				pedidos_query = pedidos_query.filter(ChecklistPedido.id_sede == user.id_sede)
+			alerts['pedidos_pendientes_count'] = pedidos_query.count()
+
+		if user and user.can_view('arqueo'):
+			arqueo_query = ArqueoCaja.query.filter(ArqueoCaja.fecha == selected_date)
+			if user.rol_nombre != 'admin_general':
+				arqueo_query = arqueo_query.filter(
+					ArqueoCaja.id_sede == user.id_sede,
+					ArqueoCaja.id_turno == user.id_turno,
+				)
+			alerts['missing_arqueo'] = arqueo_query.count() == 0
+
+		role_name = user.rol_nombre if user else ''
+
+		if role_name == 'admin_general':
+			alerts['subtitle'] = 'Vision global: pendientes de todo el equipo.'
+			checklists_pendientes = ChecklistPedido.query.filter(
+				db.func.date(ChecklistPedido.fecha) == date_str,
+				ChecklistPedido.estado_general.in_(['Borrador', 'Pendiente']),
+			).count()
+			admin_sala_scopes = db.session.query(Usuario.id_sede, Usuario.id_turno).join(
+				Rol, Rol.id_rol == Usuario.id_rol
+			).filter(
+				Rol.nombre_rol == 'admin_sala'
+			).distinct().all()
+			missing_arqueos_count = 0
+			for scope in admin_sala_scopes:
+				if ArqueoCaja.query.filter_by(
+					fecha=selected_date,
+					id_sede=scope.id_sede,
+					id_turno=scope.id_turno,
+				).first() is None:
+					missing_arqueos_count += 1
+
+			alerts['cards'] = [
+				{'title': 'Stock critico', 'message': f"Hay {alerts['stock_critico_count']} productos con stock critico.", 'state': 'warn' if alerts['stock_critico_count'] > 0 else 'ok', 'link': 'inventario'},
+				{'title': 'Pedidos pendientes', 'message': f"Hay {alerts['pedidos_pendientes_count']} pedidos sin cerrar.", 'state': 'warn' if alerts['pedidos_pendientes_count'] > 0 else 'ok', 'link': 'pedidos'},
+				{'title': 'Checklist pendientes', 'message': f"Hay {checklists_pendientes} checklist en borrador o pendiente.", 'state': 'warn' if checklists_pendientes > 0 else 'ok', 'link': 'checklist'},
+				{'title': 'Arqueos faltantes', 'message': f"Faltan {missing_arqueos_count} arqueos de admin sala por registrar.", 'state': 'warn' if missing_arqueos_count > 0 else 'ok', 'link': 'arqueo'},
+			]
+			return alerts
+
+		if role_name == 'cocinero':
+			alerts['subtitle'] = 'Tu foco es completar y enviar tu checklist del turno.'
+			my_checklist = _checklist_base_query(user, selected_date).order_by(ChecklistPedido.id_pedido.desc()).first()
+			checklist_done = bool(my_checklist and my_checklist.estado_general in {'Enviado', 'Finalizado'})
+			if my_checklist is None:
+				message = 'Aun no creaste tu lista de hoy.'
+			elif checklist_done:
+				message = f'Tu lista ya fue enviada. Estado: {my_checklist.estado_general}.'
+			else:
+				message = f"Tu lista aun esta en estado {my_checklist.estado_general}."
+			alerts['cards'] = [{'title': 'Checklist de cocina', 'message': message, 'state': 'ok' if checklist_done else 'warn', 'link': 'checklist'}]
+			return alerts
+
+		if role_name == 'admin_sala':
+			alerts['subtitle'] = 'Hoy debes completar checklist y registrar arqueo de caja.'
+			my_checklist = _checklist_base_query(user, selected_date).order_by(ChecklistPedido.id_pedido.desc()).first()
+			checklist_done = bool(my_checklist and my_checklist.estado_general in {'Enviado', 'Finalizado'})
+			if my_checklist is None:
+				checklist_message = 'Aun no creaste tu checklist del turno.'
+			elif checklist_done:
+				checklist_message = 'Checklist completado correctamente.'
+			else:
+				checklist_message = f"Checklist en progreso ({my_checklist.estado_general})."
+			arqueo_done = not alerts['missing_arqueo']
+			alerts['cards'] = [
+				{'title': 'Checklist de sala', 'message': checklist_message, 'state': 'ok' if checklist_done else 'warn', 'link': 'checklist'},
+				{'title': 'Arqueo de caja', 'message': 'Arqueo registrado para hoy.' if arqueo_done else 'Falta registrar arqueo de caja hoy.', 'state': 'ok' if arqueo_done else 'warn', 'link': 'arqueo'},
+			]
+			return alerts
+
+		if role_name == 'personal_prod':
+			alerts['subtitle'] = 'Seguimiento de tu lista de pedidos de produccion.'
+			my_pedido = ChecklistPedido.query.filter(
+				ChecklistPedido.id_usuario == user.id_usuario,
+				db.func.date(ChecklistPedido.fecha) == date_str,
+			).order_by(ChecklistPedido.id_pedido.desc()).first()
+			created = my_pedido is not None
+			sent = bool(my_pedido and my_pedido.estado_general in {'Enviado', 'Finalizado'})
+			alerts['cards'] = [
+				{'title': 'Lista creada', 'message': 'Tu lista de pedidos de hoy ya existe.' if created else 'Todavia no creaste tu lista de pedidos de hoy.', 'state': 'ok' if created else 'warn', 'link': 'pedidos'},
+				{'title': 'Lista enviada', 'message': 'Tu lista ya fue enviada a sede.' if sent else 'Aun no enviaste la lista a sede.', 'state': 'ok' if sent else 'warn', 'link': 'pedidos'},
+			]
+			return alerts
 
 		alerts['cards'] = [
-			{
-				'title': 'Stock critico',
-				'message': f"Hay {alerts['stock_critico_count']} productos con stock critico.",
-				'state': 'warn' if alerts['stock_critico_count'] > 0 else 'ok',
-				'link': 'inventario',
-			},
-			{
-				'title': 'Pedidos pendientes',
-				'message': f"Hay {alerts['pedidos_pendientes_count']} pedidos sin cerrar.",
-				'state': 'warn' if alerts['pedidos_pendientes_count'] > 0 else 'ok',
-				'link': 'pedidos',
-			},
-			{
-				'title': 'Checklist pendientes',
-				'message': f"Hay {checklists_pendientes} checklist en borrador o pendiente.",
-				'state': 'warn' if checklists_pendientes > 0 else 'ok',
-				'link': 'checklist',
-			},
-			{
-				'title': 'Arqueos faltantes',
-				'message': f"Faltan {missing_arqueos_count} arqueos de admin sala por registrar.",
-				'state': 'warn' if missing_arqueos_count > 0 else 'ok',
-				'link': 'arqueo',
-			},
+			{'title': 'Stock bajo', 'message': f"Hay {alerts['stock_critico_count']} productos con stock critico.", 'state': 'warn' if alerts['stock_critico_count'] > 0 else 'ok', 'link': 'inventario'},
+			{'title': 'Pedidos pendientes', 'message': f"Tienes {alerts['pedidos_pendientes_count']} pedidos por revisar.", 'state': 'warn' if alerts['pedidos_pendientes_count'] > 0 else 'ok', 'link': 'pedidos'},
 		]
 		return alerts
-
-	if role_name == 'cocinero':
-		alerts['subtitle'] = 'Tu foco es completar y enviar tu checklist del turno.'
-		my_checklist = _checklist_base_query(user, selected_date).order_by(ChecklistPedido.id_pedido.desc()).first()
-		checklist_done = bool(my_checklist and my_checklist.estado_general in {'Enviado', 'Finalizado'})
-		if my_checklist is None:
-			message = 'Aun no creaste tu lista de hoy.'
-		elif checklist_done:
-			message = f'Tu lista ya fue enviada. Estado: {my_checklist.estado_general}.'
-		else:
-			message = f"Tu lista aun esta en estado {my_checklist.estado_general}."
-		alerts['cards'] = [
-			{
-				'title': 'Checklist de cocina',
-				'message': message,
-				'state': 'ok' if checklist_done else 'warn',
-				'link': 'checklist',
-			}
-		]
-		return alerts
-
-	if role_name == 'admin_sala':
-		alerts['subtitle'] = 'Hoy debes completar checklist y registrar arqueo de caja.'
-		my_checklist = _checklist_base_query(user, selected_date).order_by(ChecklistPedido.id_pedido.desc()).first()
-		checklist_done = bool(my_checklist and my_checklist.estado_general in {'Enviado', 'Finalizado'})
-		if my_checklist is None:
-			checklist_message = 'Aun no creaste tu checklist del turno.'
-		elif checklist_done:
-			checklist_message = 'Checklist completado correctamente.'
-		else:
-			checklist_message = f"Checklist en progreso ({my_checklist.estado_general})."
-
-		arqueo_done = not alerts['missing_arqueo']
-		alerts['cards'] = [
-			{
-				'title': 'Checklist de sala',
-				'message': checklist_message,
-				'state': 'ok' if checklist_done else 'warn',
-				'link': 'checklist',
-			},
-			{
-				'title': 'Arqueo de caja',
-				'message': 'Arqueo registrado para hoy.' if arqueo_done else 'Falta registrar arqueo de caja hoy.',
-				'state': 'ok' if arqueo_done else 'warn',
-				'link': 'arqueo',
-			},
-		]
-		return alerts
-
-	if role_name == 'personal_prod':
-		alerts['subtitle'] = 'Seguimiento de tu lista de pedidos de produccion.'
-		my_pedido = ChecklistPedido.query.filter(
-			ChecklistPedido.id_usuario == user.id_usuario,
-			db.func.date(ChecklistPedido.fecha) == date_str,
-		).order_by(ChecklistPedido.id_pedido.desc()).first()
-		created = my_pedido is not None
-		sent = bool(my_pedido and my_pedido.estado_general in {'Enviado', 'Finalizado'})
-		alerts['cards'] = [
-			{
-				'title': 'Lista creada',
-				'message': 'Tu lista de pedidos de hoy ya existe.' if created else 'Todavia no creaste tu lista de pedidos de hoy.',
-				'state': 'ok' if created else 'warn',
-				'link': 'pedidos',
-			},
-			{
-				'title': 'Lista enviada',
-				'message': 'Tu lista ya fue enviada a sede.' if sent else 'Aun no enviaste la lista a sede.',
-				'state': 'ok' if sent else 'warn',
-				'link': 'pedidos',
-			},
-		]
-		return alerts
-
-	alerts['cards'] = [
-		{
-			'title': 'Stock bajo',
-			'message': f"Hay {alerts['stock_critico_count']} productos con stock critico.",
-			'state': 'warn' if alerts['stock_critico_count'] > 0 else 'ok',
-			'link': 'inventario',
-		},
-		{
-			'title': 'Pedidos pendientes',
-			'message': f"Tienes {alerts['pedidos_pendientes_count']} pedidos por revisar.",
-			'state': 'warn' if alerts['pedidos_pendientes_count'] > 0 else 'ok',
-			'link': 'pedidos',
-		},
-	]
-
-	return alerts
+	except Exception:
+		return {
+			'stock_critico_count': 0,
+			'pedidos_pendientes_count': 0,
+			'missing_arqueo': False,
+			'subtitle': 'Resumen de tareas para hoy segun tu rol.',
+			'cards': [{'title': 'Sin pendientes', 'message': 'No se pudo calcular el resumen del dashboard. Reintenta.', 'state': 'ok', 'link': None}],
+		}
 
 
 def _inventory_dashboard_metrics(user, selected_date):
@@ -478,22 +494,48 @@ def _generate_product_id():
 def _parse_gastos_from_form(form_data):
 	nombres = form_data.getlist('gasto_nombre[]')
 	montos = form_data.getlist('gasto_monto[]')
+	tipos = form_data.getlist('gasto_tipo[]')
 	gastos = []
-	for nombre, monto_raw in zip(nombres, montos):
+	allowed_types = {
+		'Productos de cocina faltantes', 'Productos de sala faltantes', 'Comida',
+		'Propina', 'Marketing', 'Almacén', 'Otros',
+	}
+	for index, (nombre, monto_raw) in enumerate(zip(nombres, montos)):
 		nombre_limpio = (nombre or '').strip()
 		monto = _safe_float(monto_raw, 0.0)
+		tipo = (tipos[index] if index < len(tipos) else 'Otros').strip()
+		if tipo not in allowed_types:
+			tipo = 'Otros'
 		if not nombre_limpio and monto <= 0:
 			continue
 		if monto < 0:
 			monto = 0.0
-		gastos.append({'nombre': nombre_limpio or 'Gasto', 'monto': monto})
+		gastos.append({'nombre': nombre_limpio or tipo, 'tipo': tipo, 'monto': monto})
 	return gastos
+
+
+def _audit_arqueo(arqueo, accion, valor_anterior, valor_nuevo):
+	return _audit_arqueo_event(arqueo, 'GUARDADO_MANUAL', accion, valor_anterior, valor_nuevo)
+
+
+def _audit_arqueo_event(arqueo, tipo_evento, campo, valor_anterior, valor_nuevo):
+	db.session.add(
+		ArqueoCajaHistorial(
+			id_arqueo=arqueo.id_arqueo,
+			usuario_id=current_user.id_usuario,
+			accion=campo,
+			tipo_evento=tipo_evento,
+			campo_o_seccion_afectada=campo,
+			valor_anterior=json.dumps(valor_anterior, ensure_ascii=True, default=str),
+			valor_nuevo=json.dumps(valor_nuevo, ensure_ascii=True, default=str),
+		)
+	)
 
 
 def _calc_cierre_operativo(monto_inicial, pos_tarjetas, yape, plin, efectivo, venta_sistema, gastos):
 	total_ingresos = pos_tarjetas + yape + plin + efectivo
 	gastos_totales = sum(_safe_float(item.get('monto'), 0.0) for item in (gastos or []))
-	subtotal = total_ingresos + gastos_totales
+	subtotal = total_ingresos - gastos_totales
 	diferencia = (subtotal - monto_inicial) - venta_sistema
 	estado_diferencia = 'Cuadre exacto'
 	if diferencia > 0:
@@ -513,6 +555,24 @@ def _normalize_header(text):
 	if text is None:
 		return ''
 	return str(text).strip().lower().replace(' ', '_')
+
+
+def _normalize_area(value):
+	return str(value or '').strip().lower()
+
+
+def _normalize_subarea(area, value):
+	return str(value or '').strip().lower()
+
+
+def _get_subareas_for_area(area_name):
+	area_name = _normalize_area(area_name)
+	if not area_name:
+		return []
+	area = Area.query.filter(db.func.lower(Area.nombre_area) == area_name).first()
+	if not area:
+		return []
+	return [subarea.nombre_subarea for subarea in Subarea.query.filter_by(id_area=area.id_area).order_by(Subarea.nombre_subarea.asc()).all()]
 
 
 def _checklist_base_query(user, selected_date=None):
@@ -943,6 +1003,9 @@ def _ensure_inventory_schema(app):
 	if 'area' not in columns:
 		with db.engine.begin() as connection:
 			connection.execute(text('ALTER TABLE productos ADD COLUMN area VARCHAR(20)'))
+	if 'costo_unitario' not in columns:
+		with db.engine.begin() as connection:
+			connection.execute(text('ALTER TABLE productos ADD COLUMN costo_unitario FLOAT DEFAULT 0'))
 
 	detalle_columns = {column['name'] for column in inspector.get_columns('detalle_pedido')}
 	if 'id_usuario' not in detalle_columns:
@@ -962,12 +1025,46 @@ def _ensure_inventory_schema(app):
 	if 'efectivo' not in arqueo_columns:
 		with db.engine.begin() as connection:
 			connection.execute(text('ALTER TABLE arqueo_caja ADD COLUMN efectivo FLOAT DEFAULT 0'))
+	if 'efectivo_a_entregar' not in arqueo_columns:
+		with db.engine.begin() as connection:
+			connection.execute(text('ALTER TABLE arqueo_caja ADD COLUMN efectivo_a_entregar FLOAT DEFAULT 0'))
 	if 'venta_sistema' not in arqueo_columns:
 		with db.engine.begin() as connection:
 			connection.execute(text('ALTER TABLE arqueo_caja ADD COLUMN venta_sistema FLOAT DEFAULT 0'))
 	if 'gastos_json' not in arqueo_columns:
 		with db.engine.begin() as connection:
 			connection.execute(text("ALTER TABLE arqueo_caja ADD COLUMN gastos_json TEXT DEFAULT '[]'"))
+	if 'efectivo_entregado' not in arqueo_columns:
+		with db.engine.begin() as connection:
+			connection.execute(text('ALTER TABLE arqueo_caja ADD COLUMN efectivo_entregado FLOAT DEFAULT 0'))
+	for column_name, column_type in (
+		('efectivo_dejado_caja_recomendado', 'FLOAT DEFAULT 0'),
+		('efectivo_dejado_caja_real', 'FLOAT DEFAULT 0'),
+		('diferencia_efectivo_dejado', 'FLOAT DEFAULT 0'),
+		('seccion_1_guardada', 'BOOLEAN DEFAULT 0'),
+		('efectivo_entregado_guardado', 'BOOLEAN DEFAULT 0'),
+		('efectivo_dejado_guardado', 'BOOLEAN DEFAULT 0'),
+		('campos_bloqueados_json', "TEXT DEFAULT '[]'"),
+		('venta_sistema_guardada', 'BOOLEAN DEFAULT 0'),
+	):
+		if column_name not in arqueo_columns:
+			with db.engine.begin() as connection:
+				connection.execute(text(f'ALTER TABLE arqueo_caja ADD COLUMN {column_name} {column_type}'))
+
+	historial_columns = {column['name'] for column in inspector.get_columns('arqueo_caja_historial')}
+	for column_name, column_type in (
+		('tipo_evento', "VARCHAR(30) DEFAULT 'GUARDADO_MANUAL'"),
+		('campo_o_seccion_afectada', 'VARCHAR(120)'),
+	):
+		if column_name not in historial_columns:
+			with db.engine.begin() as connection:
+				connection.execute(text(f'ALTER TABLE arqueo_caja_historial ADD COLUMN {column_name} {column_type}'))
+
+	# Asegurar columna en tabla sedes para monto inicial base esperado
+	sedes_columns = {column['name'] for column in inspector.get_columns('sedes')}
+	if 'monto_inicial_base_esperado' not in sedes_columns:
+		with db.engine.begin() as connection:
+			connection.execute(text('ALTER TABLE sedes ADD COLUMN monto_inicial_base_esperado FLOAT DEFAULT 0'))
 
 	usuario_columns = {column['name'] for column in inspector.get_columns('usuarios')}
 	if 'dni' not in usuario_columns:
@@ -990,6 +1087,9 @@ def _ensure_inventory_schema(app):
 			connection.execute(text('ALTER TABLE usuarios ADD COLUMN bio VARCHAR(240)'))
 
 	with db.engine.begin() as connection:
+		if not inspect(db.engine).has_table('recordatorios_cierre'):
+			RecordatorioCierre.__table__.create(bind=db.engine)
+		connection.execute(text("UPDATE arqueo_caja SET venta_sistema_guardada = 1 WHERE venta_sistema IS NOT NULL AND venta_sistema != 0 AND venta_sistema_guardada = 0"))
 		connection.execute(
 			text(
 				"""
@@ -1024,6 +1124,9 @@ def create_app():
 	# Fallback local para desarrollo cuando no existe DATABASE_URL
 	app.config['SQLALCHEMY_DATABASE_URI'] = database_url or 'sqlite:///mi_app.db'
 	app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+	# Evita que el navegador conserve plantillas y recursos durante el desarrollo.
+	app.config['TEMPLATES_AUTO_RELOAD'] = True
+	app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 	app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'una_clave_muy_secreta')
 	app.config['REMEMBER_COOKIE_DURATION'] = timedelta(days=90)
 	app.config['REMEMBER_COOKIE_REFRESH_EACH_REQUEST'] = True
@@ -1031,6 +1134,13 @@ def create_app():
 	app.config['SESSION_COOKIE_HTTPONLY'] = True
 	app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 	app.jinja_env.filters['peru_datetime'] = _format_peru_datetime
+
+	@app.after_request
+	def disable_browser_cache(response):
+		response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+		response.headers['Pragma'] = 'no-cache'
+		response.headers['Expires'] = '0'
+		return response
 
 	db.init_app(app)
 	login_manager.init_app(app)
@@ -1094,11 +1204,17 @@ def create_app():
 	@login_required
 	def dashboard():
 		selected_date = _get_selected_app_date()
+		try:
+			stats = _stats_for_user(current_user)
+			alerts = _home_alerts_for_user(current_user, selected_date)
+		except Exception:
+			stats = {'productos': 0, 'movimientos': 0, 'pedidos': 0, 'arqueos': 0}
+			alerts = {'stock_critico_count': 0, 'pedidos_pendientes_count': 0, 'missing_arqueo': False, 'subtitle': 'Resumen de tareas para hoy segun tu rol.', 'cards': [{'title': 'Sin pendientes', 'message': 'No se pudo calcular el resumen del dashboard. Reintenta.', 'state': 'ok', 'link': None}]}
 		return render_template(
 			'dashboard/home.html',
 			allowed_views=_allowed_views(current_user),
-			stats=_stats_for_user(current_user),
-			alerts=_home_alerts_for_user(current_user, selected_date),
+			stats=stats,
+			alerts=alerts,
 		)
 
 	@app.route('/inventario/dashboard')
@@ -1232,6 +1348,7 @@ def create_app():
 				producto.area = _normalize_area(request.form.get('area', '')) or 'cocina'
 				producto.subarea = _normalize_subarea(producto.area, request.form.get('subarea', ''))
 				producto.unidad = request.form.get('unidad', '').strip()
+				producto.costo_unitario = _safe_float(request.form.get('costo_unitario'), producto.costo_unitario or 0.0)
 				producto.estado = request.form.get('estado', 'Activo').strip() or 'Activo'
 
 				row = InventarioSede.query.filter_by(id_sede=target_sede, id_producto=id_producto).first()
@@ -1570,6 +1687,7 @@ def create_app():
 		sede_idx = idx('sede')
 
 		processed = 0
+		deleted = 0
 		errors = []
 		imported_pairs = set()
 		sedes_objetivo = set()
@@ -1664,8 +1782,8 @@ def create_app():
 			flash(f'No se pudo subir el Excel: {exc}', 'error')
 			return redirect(url_for('inventario'))
 
-	flash(f'Importacion OK. Filas sincronizadas: {processed}. Registros eliminados por sincronizacion: {deleted}.', 'ok')
-	return redirect(url_for('inventario'))
+		flash(f'Importacion OK. Filas sincronizadas: {processed}. Registros eliminados por sincronizacion: {deleted}.', 'ok')
+		return redirect(url_for('inventario'))
 
 	@app.route('/movimientos', methods=['GET', 'POST'])
 	@login_required
@@ -1983,6 +2101,8 @@ def create_app():
 
 		selected_pedido = None
 		selected_items = []
+		selected_sede_nombre = ''
+		selected_turno_nombre = ''
 		if pedido_id is not None:
 			selected_pedido = ChecklistPedido.query.get(pedido_id)
 			if selected_pedido:
@@ -2002,8 +2122,6 @@ def create_app():
 				selected_items = selected_items_query.order_by(Producto.nombre_producto.asc()).all()
 
 				# Nombre legible de sede/turno para la UI de impresión
-				selected_sede_nombre = ''
-				selected_turno_nombre = ''
 				if selected_pedido:
 					if selected_pedido.id_sede:
 						sede_obj = Sede.query.get(selected_pedido.id_sede)
@@ -2480,6 +2598,183 @@ def create_app():
 		response.headers['Cache-Control'] = 'no-cache'
 		return response
 
+	@app.route('/horarios')
+	@login_required
+	def horarios():
+		if not current_user.can_view('horarios'):
+			return _forbidden_redirect()
+		return render_template('horarios/agenda.html', allowed_views=_allowed_views(current_user), agenda_role=current_user.rol_nombre, agenda_sede_id=current_user.id_sede, agenda_turno_id=current_user.id_turno)
+
+	@app.route('/horarios/<path:filename>')
+	@login_required
+	def horarios_asset(filename):
+		if not current_user.can_view('horarios'):
+			return _forbidden_redirect()
+		return send_from_directory(os.path.join(app.template_folder, 'horarios'), filename)
+
+	@app.route('/api/horarios/catalogos')
+	@login_required
+	def horarios_catalogos():
+		if not current_user.can_view('horarios'):
+			return jsonify({'error': 'forbidden'}), 403
+		turnos = Turno.query.filter(Turno.id_turno != 'NA').order_by(Turno.nombre_turno).all()
+		return jsonify({
+			'sedes': [{'id': sede.id_sede, 'nombre': sede.nombre_sede, 'estado': 'activo'} for sede in Sede.query.order_by(Sede.nombre_sede).all()],
+			'turnos': [{'id': index + 1, 'id_global': turno.id_turno, 'nombre': turno.nombre_turno, 'horaInicio': '12:00' if turno.id_turno == 'MANANA' else '18:30', 'horaFin': '17:30' if turno.id_turno == 'MANANA' else '00:30', 'toleranciaMinutos': 10, 'estado': 'activo'} for index, turno in enumerate(turnos)],
+		})
+
+	@app.route('/api/horarios/auditoria', methods=['POST'])
+	@login_required
+	def horarios_auditoria():
+		if not current_user.can_write('horarios', 'insert'):
+			return jsonify({'error': 'forbidden'}), 403
+		payload = request.get_json(silent=True) or {}
+		db.session.add(AgendaAuditoria(id_usuario=current_user.id_usuario, accion=str(payload.get('accion', 'cambio'))[:40], entidad=str(payload.get('entidad', 'agenda'))[:40], detalle_json=json.dumps(payload, ensure_ascii=True, default=str)))
+		db.session.commit()
+		return jsonify({'ok': True})
+
+	@app.route('/api/horarios/datos', methods=['GET', 'PUT'])
+	@login_required
+	def horarios_datos():
+		if not current_user.can_view('horarios'):
+			return jsonify({'error': 'forbidden'}), 403
+		registro = db.session.get(AgendaPersistencia, 1)
+		if request.method == 'GET':
+			return jsonify({'exists': bool(registro and registro.datos_json and registro.datos_json != '{}'), 'datos': json.loads(registro.datos_json) if registro else None})
+		if not current_user.can_write('horarios', 'update'):
+			return jsonify({'error': 'forbidden'}), 403
+		payload = request.get_json(silent=True) or {}
+		if not isinstance(payload, dict):
+			return jsonify({'error': 'invalid_payload'}), 400
+		if registro is None:
+			registro = AgendaPersistencia(id_agenda=1)
+			db.session.add(registro)
+		registro.datos_json = json.dumps(payload, ensure_ascii=False, default=str)
+		registro.actualizado_por = current_user.id_usuario
+		db.session.add(AgendaAuditoria(id_usuario=current_user.id_usuario, accion='sincronizar_datos', entidad='agenda', detalle_json=json.dumps({'colecciones': list(payload.keys())}, ensure_ascii=True)))
+		db.session.commit()
+		return jsonify({'ok': True})
+
+	@app.route('/api/horarios/exportar-trabajadores')
+	@login_required
+	def horarios_exportar_trabajadores():
+		if not current_user.can_view('horarios'):
+			return jsonify({'error': 'forbidden'}), 403
+		registro = db.session.get(AgendaPersistencia, 1)
+		datos = json.loads(registro.datos_json) if registro and registro.datos_json else {}
+		trabajadores = datos.get('trabajadores', []) if isinstance(datos, dict) else []
+		if current_user.rol_nombre != 'admin_general':
+			turno_local = {'MANANA': 1, 'NOCHE': 2}.get(current_user.id_turno, current_user.id_turno)
+			trabajadores = [item for item in trabajadores if str(item.get('sedeId')) == str(current_user.id_sede) and str(item.get('turnoId')) in {str(turno_local), str(current_user.id_turno)}]
+		workbook = Workbook()
+		worksheet = workbook.active
+		worksheet.title = 'Trabajadores'
+		columns = ['Nombre', 'Apellido', 'DNI', 'Telefono', 'Fecha nacimiento', 'Fecha ingreso', 'Direccion', 'Emergencia', 'Grado profesional', 'Profesion', 'Institucion de estudios', 'Area', 'Cargo principal', 'Otros cargos', 'Sede', 'Turno', 'Dia descanso', 'Estado']
+		worksheet.append(columns)
+		for trabajador in trabajadores:
+			fila = [trabajador.get(key, '') for key in ('nombre', 'apellido', 'dni', 'telefono', 'fechaNacimiento', 'fechaIngreso', 'direccion', 'emergenciaNumero', 'gradoProfesional', 'profesion', 'institucionEstudios', 'areaId', 'cargos', 'otrosCargos', 'sedeId', 'turnoId', 'diaDescanso', 'estado')]
+			fila[12] = ';'.join(str(value) for value in fila[12]) if isinstance(fila[12], list) else fila[12]
+			fila[13] = ';'.join(str(value) for value in fila[13]) if isinstance(fila[13], list) else fila[13]
+			worksheet.append(fila)
+		buffer = BytesIO()
+		workbook.save(buffer)
+		buffer.seek(0)
+		return send_file(buffer, as_attachment=True, download_name=f'trabajadores_{datetime.utcnow().strftime("%Y%m%d")}.xlsx', mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+	@app.route('/api/horarios/molde-trabajadores')
+	@login_required
+	def horarios_molde_trabajadores():
+		if not current_user.can_write('horarios', 'update'):
+			return jsonify({'error': 'forbidden'}), 403
+		workbook = Workbook()
+		worksheet = workbook.active
+		worksheet.title = 'Trabajadores'
+		columns = ['Nombre', 'Apellido', 'DNI', 'Telefono', 'Fecha nacimiento', 'Fecha ingreso', 'Direccion', 'Emergencia', 'Grado profesional', 'Profesion', 'Institucion de estudios', 'Area', 'Cargo principal', 'Otros cargos', 'Sede', 'Turno', 'Dia descanso', 'Estado']
+		worksheet.append(columns)
+		for cell in worksheet[1]:
+			cell.font = Font(bold=True)
+		worksheet.freeze_panes = 'A2'
+		catalog_sheet = workbook.create_sheet('Catalogos')
+		catalog_sheet.append(['Campo', 'Valores validos'])
+		catalog_sheet.append(['Sede', ' | '.join(sede.nombre_sede for sede in Sede.query.order_by(Sede.nombre_sede).all())])
+		catalog_sheet.append(['Turno', ' | '.join(turno.nombre_turno for turno in Turno.query.filter(Turno.id_turno != 'NA').order_by(Turno.nombre_turno).all())])
+		catalog_sheet.append(['Area', 'Usa los nombres configurados en la Agenda'])
+		catalog_sheet.append(['Cargo principal / Otros cargos', 'Usa los cargos configurados en la Agenda'])
+		for cell in catalog_sheet[1]:
+			cell.font = Font(bold=True)
+		buffer = BytesIO()
+		workbook.save(buffer)
+		buffer.seek(0)
+		return send_file(buffer, as_attachment=True, download_name='molde_trabajadores.xlsx', mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+	@app.route('/api/horarios/importar-trabajadores', methods=['POST'])
+	@login_required
+	def horarios_importar_trabajadores():
+		if not current_user.can_write('horarios', 'update'):
+			return jsonify({'error': 'forbidden'}), 403
+		archivo = request.files.get('archivo')
+		if not archivo:
+			return jsonify({'error': 'missing_file'}), 400
+		try:
+			worksheet = __import__('openpyxl').load_workbook(archivo, read_only=True, data_only=True).active
+			rows = list(worksheet.iter_rows(values_only=True))
+			if not rows:
+				return jsonify({'error': 'empty_file'}), 400
+			headers = [str(value or '').strip().lower() for value in rows[0]]
+			aliases = {'nombre': 'nombre', 'apellido': 'apellido', 'dni': 'dni', 'telefono': 'telefono', 'fecha nacimiento': 'fechaNacimiento', 'fecha ingreso': 'fechaIngreso', 'direccion': 'direccion', 'emergencia': 'emergenciaNumero', 'grado profesional': 'gradoProfesional', 'profesion': 'profesion', 'institucion de estudios': 'institucionEstudios', 'area': 'area', 'cargo principal': 'cargoPrincipal', 'otros cargos': 'otrosCargos', 'sede': 'sede', 'turno': 'turno', 'dia descanso': 'diaDescanso', 'estado': 'estado'}
+			data = []
+			for row in rows[1:]:
+				values = {aliases[header]: row[index] for index, header in enumerate(headers) if header in aliases and index < len(row)}
+				if not str(values.get('nombre') or '').strip() or not str(values.get('apellido') or '').strip():
+					continue
+				data.append(values)
+			registro = db.session.get(AgendaPersistencia, 1)
+			payload = json.loads(registro.datos_json) if registro and registro.datos_json else {}
+			workers = payload.get('trabajadores', [])
+			existing_by_dni = {str(item.get('dni')): item for item in workers if item.get('dni')}
+			for item in data:
+				dni = str(item.get('dni') or '').strip()
+				worker = existing_by_dni.get(dni) if dni else None
+				if worker is None:
+					worker = {'id': max([int(existing.get('id', 0)) for existing in workers if str(existing.get('id', '')).isdigit()] or [0]) + 1}
+					workers.append(worker)
+				for key, value in item.items():
+					if value is not None and key not in {'sede', 'turno', 'area', 'cargoPrincipal', 'otrosCargos', 'diaDescanso'}:
+						worker[key] = str(value)
+				worker['estado'] = str(item.get('estado') or worker.get('estado') or 'activo').lower()
+				worker['sedeId'] = next((s.id_sede for s in Sede.query.all() if s.nombre_sede.lower().replace('_', ' ') == str(item.get('sede', '')).lower().replace('_', ' ')), worker.get('sedeId'))
+				worker['turnoId'] = next((index + 1 for index, turno in enumerate(Turno.query.filter(Turno.id_turno != 'NA').order_by(Turno.nombre_turno).all()) if turno.nombre_turno.lower() == str(item.get('turno', '')).lower()), worker.get('turnoId'))
+				areas = payload.get('areas', [])
+				cargos = payload.get('cargos', [])
+				area_nombre = str(item.get('area') or '').strip().lower()
+				cargo_principal = str(item.get('cargoPrincipal') or '').strip().lower()
+				otros_nombres = [nombre.strip().lower() for nombre in str(item.get('otrosCargos') or '').split(';') if nombre.strip()]
+				worker['areaId'] = next((area.get('id') for area in areas if str(area.get('nombre', '')).lower() == area_nombre), worker.get('areaId'))
+				worker['cargos'] = [cargo.get('id') for cargo in cargos if str(cargo.get('nombre', '')).lower() == cargo_principal] or worker.get('cargos', [])
+				worker['otrosCargos'] = [cargo.get('id') for cargo in cargos if str(cargo.get('nombre', '')).lower() in otros_nombres]
+			payload['trabajadores'] = workers
+			if registro is None:
+				registro = AgendaPersistencia(id_agenda=1)
+				db.session.add(registro)
+			registro.datos_json = json.dumps(payload, ensure_ascii=False, default=str)
+			registro.actualizado_por = current_user.id_usuario
+			db.session.commit()
+			return jsonify({'ok': True, 'importados': len(data)})
+		except Exception as error:
+			return jsonify({'error': str(error)}), 400
+
+	@app.route('/api/horarios/trabajadores')
+	@login_required
+	def horarios_trabajadores():
+		if not current_user.can_view('horarios'):
+			return jsonify({'error': 'forbidden'}), 403
+		registro = db.session.get(AgendaPersistencia, 1)
+		payload = json.loads(registro.datos_json) if registro and registro.datos_json else {}
+		workers = payload.get('trabajadores', [])
+		if current_user.rol_nombre != 'admin_general':
+			workers = [item for item in workers if str(item.get('sedeId')) == str(current_user.id_sede) and str(item.get('turnoId')) in {str(current_user.id_turno), str({'MANANA': 1, 'NOCHE': 2}.get(current_user.id_turno))}]
+		return jsonify([{'id': item.get('id'), 'nombre': f"{item.get('nombre', '')} {item.get('apellido', '')}".strip(), 'dni': item.get('dni', '')} for item in workers])
+
 	@app.route('/checklist/template/export')
 	@login_required
 	def checklist_template_export():
@@ -2506,6 +2801,212 @@ def create_app():
 			download_name=f'{safe_name}_plantilla_{stamp}.json',
 			mimetype='application/json',
 		)
+
+	@app.route('/mermas/productos', methods=['GET'])
+	@login_required
+	def mermas_productos():
+		if not current_user.can_view('mermas'):
+			return jsonify({'error': 'forbidden'}), 403
+		sede_id = current_user.id_sede
+		if current_user.rol_nombre == 'admin_general' and request.args.get('sede', '').isdigit():
+			sede_id = int(request.args['sede'])
+		rows = db.session.query(Producto, InventarioSede).outerjoin(
+			InventarioSede,
+			db.and_(InventarioSede.id_producto == Producto.id_producto, InventarioSede.id_sede == sede_id),
+		).filter(Producto.estado != 'Inactivo').order_by(Producto.nombre_producto).all()
+		return jsonify([{
+			'id': producto.id_producto,
+			'name': producto.nombre_producto,
+			'unit': producto.unidad or 'unidad',
+			'cost': float(producto.costo_unitario or 0),
+			'stock': float(inventario.stock_actual if inventario else 0),
+		} for producto, inventario in rows])
+
+	@app.route('/mermas', methods=['GET', 'POST'])
+	@login_required
+	def mermas():
+		if not current_user.can_view('mermas'):
+			return _forbidden_redirect()
+		is_admin_general = current_user.rol_nombre == 'admin_general'
+		selected_date = _get_selected_app_date()
+		month = selected_date.strftime('%Y-%m')
+		target_sede = current_user.id_sede
+		target_turno = current_user.id_turno
+		if is_admin_general and request.args.get('sede', '').isdigit():
+			target_sede = int(request.args['sede'])
+		if is_admin_general and request.method == 'POST' and request.form.get('sede', '').isdigit():
+			target_sede = int(request.form['sede'])
+		if is_admin_general and request.args.get('turno'):
+			target_turno = request.args['turno']
+
+		if request.method == 'POST':
+			if request.form.get('action') == 'catalogo':
+				if not is_admin_general:
+					return _forbidden_redirect()
+				category = request.form.get('categoria', '').strip()
+				name = request.form.get('nombre', '').strip()
+				if category in {'area', 'turno', 'tipo_merma', 'responsable'} and name:
+					if not CatalogoMerma.query.filter_by(categoria=category, nombre=name).first():
+						db.session.add(CatalogoMerma(categoria=category, nombre=name))
+						db.session.commit()
+						flash('Catalogo actualizado.', 'ok')
+				return redirect(url_for('mermas'))
+			if not current_user.can_write('mermas', 'insert'):
+				return _forbidden_redirect()
+			try:
+				fecha = datetime.strptime(request.form.get('fecha', ''), '%Y-%m-%d').date()
+				cantidad = _safe_float(request.form.get('cantidad'), 0)
+				producto = db.session.get(Producto, request.form.get('id_producto', '').strip())
+				if not producto or cantidad <= 0:
+					raise ValueError('Producto y cantidad valida son obligatorios.')
+				inventario = InventarioSede.query.filter_by(id_sede=target_sede, id_producto=producto.id_producto).with_for_update().first()
+				stock = _safe_float(inventario.stock_actual if inventario else 0, 0)
+				if not inventario or cantidad > stock:
+					raise ValueError(f'Stock insuficiente. Disponible: {stock:.2f}')
+				costo = _safe_float(producto.costo_unitario, 0)
+				merma = Merma(
+					fecha=fecha, mes=fecha.strftime('%Y-%m'), turno=request.form.get('turno', target_turno),
+					area=request.form.get('area', '').strip(), id_producto=producto.id_producto,
+					tipo_merma=request.form.get('tipo_merma', '').strip(), cantidad=cantidad,
+					unidad=producto.unidad or request.form.get('unidad', 'unidad'), costo_unitario=costo,
+					costo_total=round(cantidad * costo, 2), responsable=request.form.get('responsable', '').strip(),
+					observaciones=request.form.get('observaciones', '').strip(), id_sede=target_sede,
+					id_usuario=current_user.id_usuario, bloqueada=True,
+				)
+				if not merma.area or not merma.tipo_merma or not merma.responsable:
+					raise ValueError('Area, tipo de merma y responsable son obligatorios.')
+				inventario.stock_actual = stock - cantidad
+				db.session.add(merma)
+				db.session.add(MovimientoInventario(id_sede=target_sede, id_producto=producto.id_producto, cantidad=cantidad, tipo='SALIDA', motivo='Merma', id_usuario=current_user.id_usuario))
+				db.session.commit()
+				flash('Merma registrada y stock actualizado.', 'ok')
+			except (ValueError, IntegrityError) as error:
+				db.session.rollback()
+				flash(str(error), 'error')
+			return redirect(url_for('mermas'))
+
+		catalogs = {key: [row.nombre for row in CatalogoMerma.query.filter_by(categoria=key, activo=True).order_by(CatalogoMerma.nombre).all()] for key in ('area', 'tipo_merma')}
+		if not catalogs['area']:
+			catalogs['area'] = ['Cocina Fria', 'Emplatado', 'Cocina Caliente', 'Almacen']
+		if not catalogs['tipo_merma']:
+			catalogs['tipo_merma'] = ['Vencido', 'Malogrado', 'Error preparacion', 'Devolucion', 'Quemado']
+		query = Merma.query.filter_by(mes=month)
+		if not is_admin_general:
+			query = query.filter_by(id_sede=current_user.id_sede, turno=current_user.id_turno)
+		else:
+			if request.args.get('sede', '').isdigit(): query = query.filter_by(id_sede=int(request.args['sede']))
+			if request.args.get('turno'): query = query.filter_by(turno=request.args['turno'])
+		for field in ('turno', 'area', 'tipo_merma'):
+			value = request.args.get(field, '').strip()
+			if value: query = query.filter(getattr(Merma, field) == value)
+		from_date_raw = request.args.get('fecha_desde', '').strip()
+		to_date_raw = request.args.get('fecha_hasta', '').strip()
+		if from_date_raw:
+			try: query = query.filter(Merma.fecha >= datetime.strptime(from_date_raw, '%Y-%m-%d').date())
+			except ValueError: pass
+		if to_date_raw:
+			try: query = query.filter(Merma.fecha <= datetime.strptime(to_date_raw, '%Y-%m-%d').date())
+			except ValueError: pass
+		history = query.order_by(Merma.fecha.desc(), Merma.id_merma.desc()).all()
+		catalogs['responsable'] = [row.nombre for row in CatalogoMerma.query.filter_by(categoria='responsable', activo=True).order_by(CatalogoMerma.nombre).all()]
+		return render_template('dashboard/mermas.html', history=history, products_url=url_for('mermas_productos', sede=target_sede), catalogs=catalogs, sedes=Sede.query.order_by(Sede.nombre_sede).all(), turnos=Turno.query.order_by(Turno.nombre_turno).all(), target_sede=target_sede, target_turno=target_turno, month=month, is_admin_general=is_admin_general, can_insert=current_user.can_write('mermas', 'insert'), allowed_views=_allowed_views(current_user))
+
+	@app.route('/incidencias', methods=['GET', 'POST'])
+	@login_required
+	def incidencias():
+		if not current_user.can_view('incidencias'):
+			return _forbidden_redirect()
+		is_admin_general = current_user.rol_nombre == 'admin_general'
+		selected_date = _get_selected_app_date()
+		month = selected_date.strftime('%Y-%m')
+		target_sede = current_user.id_sede
+		if is_admin_general and request.args.get('sede', '').isdigit():
+			target_sede = int(request.args['sede'])
+		if request.method == 'POST':
+			if not current_user.can_write('incidencias', 'insert'):
+				return _forbidden_redirect()
+			try:
+				fecha = datetime.strptime(request.form.get('fecha', ''), '%Y-%m-%d').date()
+				monto = _safe_float(request.form.get('monto'), 0)
+				descuento = request.form.get('descuento') == 'si'
+				if fecha.strftime('%Y-%m') != month:
+					raise ValueError('Solo puedes registrar datos del mes seleccionado.')
+				if not request.form.get('incidencia', '').strip() or not request.form.get('responsable', '').strip() or not request.form.get('encargado', '').strip() or (descuento and monto <= 0):
+					raise ValueError('Completa los campos obligatorios y el monto del descuento.')
+				if is_admin_general and request.form.get('sede', '').isdigit():
+					target_sede = int(request.form['sede'])
+				db.session.add(Incidencia(fecha=fecha, mes=fecha.strftime('%Y-%m'), incidencia=request.form['incidencia'].strip(), descripcion=request.form.get('descripcion', '').strip(), responsable=request.form['responsable'].strip(), encargado=request.form['encargado'].strip(), descuento=descuento, monto=monto if descuento else 0, proceso=request.form.get('proceso', 'evaluacion'), id_sede=target_sede, id_usuario=current_user.id_usuario, bloqueada=True))
+				db.session.commit()
+				flash('Incidencia registrada.', 'ok')
+			except (ValueError, IntegrityError) as error:
+				db.session.rollback()
+				flash(str(error), 'error')
+			return redirect(url_for('incidencias'))
+		query = Incidencia.query.filter_by(mes=month)
+		if not is_admin_general:
+			query = query.filter_by(id_sede=current_user.id_sede)
+		elif request.args.get('sede', '').isdigit():
+			query = query.filter_by(id_sede=target_sede)
+		from_date_raw = request.args.get('fecha_desde', '').strip()
+		to_date_raw = request.args.get('fecha_hasta', '').strip()
+		if from_date_raw:
+			try: query = query.filter(Incidencia.fecha >= datetime.strptime(from_date_raw, '%Y-%m-%d').date())
+			except ValueError: pass
+		if to_date_raw:
+			try: query = query.filter(Incidencia.fecha <= datetime.strptime(to_date_raw, '%Y-%m-%d').date())
+			except ValueError: pass
+		history = query.order_by(Incidencia.fecha.desc(), Incidencia.id_incidencia.desc()).all()
+		responsables = Usuario.query.filter_by(id_sede=target_sede).order_by(Usuario.username).all() if not is_admin_general else Usuario.query.order_by(Usuario.username).all()
+		return render_template('dashboard/incidencias.html', history=history, month=month, responsables=responsables, sedes=Sede.query.order_by(Sede.nombre_sede).all(), target_sede=target_sede, is_admin_general=is_admin_general, can_insert=current_user.can_write('incidencias', 'insert'), allowed_views=_allowed_views(current_user))
+
+	@app.route('/mermas/<int:id_merma>/editar', methods=['POST'])
+	@login_required
+	def editar_merma(id_merma):
+		if current_user.rol_nombre != 'admin_general':
+			return _forbidden_redirect()
+		merma = db.session.get(Merma, id_merma)
+		if not merma:
+			return jsonify({'error': 'not_found'}), 404
+		try:
+			new_quantity = _safe_float(request.form.get('cantidad'), merma.cantidad)
+			if new_quantity <= 0:
+				raise ValueError('La cantidad debe ser mayor que cero.')
+			inventory = InventarioSede.query.filter_by(id_sede=merma.id_sede, id_producto=merma.id_producto).with_for_update().first()
+			available_after_reversal = _safe_float(inventory.stock_actual if inventory else 0) + merma.cantidad
+			if not inventory or new_quantity > available_after_reversal:
+				raise ValueError('Stock insuficiente para este ajuste.')
+			inventory.stock_actual = available_after_reversal - new_quantity
+			merma.cantidad = new_quantity
+			merma.costo_total = round(new_quantity * merma.costo_unitario, 2)
+			for field in ('fecha', 'turno', 'area', 'tipo_merma', 'responsable', 'observaciones'):
+				if field in request.form and request.form[field].strip(): setattr(merma, field, request.form[field].strip())
+			merma.mes = merma.fecha.strftime('%Y-%m')
+			db.session.commit()
+			flash('Merma actualizada por Administración General.', 'ok')
+		except (ValueError, IntegrityError) as error:
+			db.session.rollback()
+			flash(str(error), 'error')
+		return redirect(url_for('mermas'))
+
+	@app.route('/incidencias/<int:id_incidencia>/editar', methods=['POST'])
+	@login_required
+	def editar_incidencia(id_incidencia):
+		if current_user.rol_nombre != 'admin_general':
+			return _forbidden_redirect()
+		incidencia = db.session.get(Incidencia, id_incidencia)
+		if not incidencia:
+			return jsonify({'error': 'not_found'}), 404
+		for field in ('fecha', 'incidencia', 'descripcion', 'responsable', 'encargado', 'proceso'):
+			if field in request.form and request.form[field].strip():
+				value = request.form[field].strip()
+				if field == 'fecha': value = datetime.strptime(value, '%Y-%m-%d').date()
+				setattr(incidencia, field, value)
+		incidencia.descuento = request.form.get('descuento', 'no') == 'si'
+		incidencia.monto = _safe_float(request.form.get('monto'), incidencia.monto) if incidencia.descuento else 0
+		incidencia.mes = incidencia.fecha.strftime('%Y-%m')
+		db.session.commit()
+		flash('Incidencia actualizada por Administración General.', 'ok')
+		return redirect(url_for('incidencias'))
 
 	@app.route('/arqueo', methods=['GET', 'POST'])
 	@login_required
@@ -2540,24 +3041,121 @@ def create_app():
 		if request.method == 'POST':
 			if not current_user.can_write('arqueo', 'update') and not current_user.can_write('arqueo', 'insert'):
 				return _forbidden_redirect()
+			section = request.form.get('section', 'section1')
+			if request.is_json or section == 'partial':
+				payload = request.get_json(silent=True) or {}
+				fields = payload.get('fields') or {}
+				is_autosave = payload.get('event') == 'AUTOGUARDADO_5MIN'
+				if cierre is None:
+					cierre = ArqueoCaja(id_sede=target_sede_id, id_turno=target_turno_id, id_usuario=current_user.id_usuario, fecha=selected_date)
+					db.session.add(cierre)
+					db.session.flush()
+				try:
+					locked_fields = set(json.loads(cierre.campos_bloqueados_json or '[]'))
+				except (TypeError, ValueError):
+					locked_fields = set()
+				allowed_numeric = {'monto_inicial', 'pos_tarjetas', 'yape', 'plin', 'efectivo', 'venta_sistema'}
+				for field in allowed_numeric:
+					if field not in fields or (field in locked_fields and not is_admin_general):
+						continue
+					raw_value = fields.get(field)
+					if raw_value in ('', None):
+						continue
+					old_value = getattr(cierre, field)
+					new_value = _safe_float(raw_value, old_value or 0.0)
+					setattr(cierre, field, new_value)
+					locked_fields.add(field)
+					_audit_arqueo_event(cierre, 'AUTOGUARDADO_5MIN' if is_autosave else 'GUARDADO_MANUAL', field, old_value, new_value)
+					if field == 'venta_sistema':
+						cierre.venta_sistema_guardada = True
 
-			monto_inicial = _safe_float(request.form.get('monto_inicial'), 0.0)
-			pos_tarjetas = _safe_float(request.form.get('pos_tarjetas'), 0.0)
-			yape = _safe_float(request.form.get('yape'), 0.0)
-			plin = _safe_float(request.form.get('plin'), 0.0)
-			efectivo = _safe_float(request.form.get('efectivo'), 0.0)
-			venta_sistema = _safe_float(request.form.get('venta_sistema'), 0.0)
-			gastos = _parse_gastos_from_form(request.form)
-			resumen = _calc_cierre_operativo(
-				monto_inicial,
-				pos_tarjetas,
-				yape,
-				plin,
-				efectivo,
-				venta_sistema,
-				gastos,
-			)
+				audit_enabled = bool(
+					cierre.venta_sistema_guardada
+					and locked_fields.intersection({'pos_tarjetas', 'yape', 'plin', 'efectivo'})
+				)
 
+				if 'observaciones' in fields:
+					old_value = cierre.observaciones or ''
+					new_value = str(fields.get('observaciones') or '')
+					if old_value != new_value:
+						cierre.observaciones = new_value
+						_audit_arqueo_event(cierre, 'AUTOGUARDADO_5MIN' if is_autosave else 'GUARDADO_MANUAL', 'observaciones', old_value, new_value)
+
+				if 'efectivo_entregado' in fields and (('efectivo_entregado' not in locked_fields) or is_admin_general):
+					raw_value = fields.get('efectivo_entregado')
+					if raw_value not in ('', None) and audit_enabled:
+						old_value = cierre.efectivo_entregado
+						cierre.efectivo_entregado = _safe_float(raw_value, old_value or 0.0)
+						cierre.efectivo_entregado_guardado = True
+						locked_fields.add('efectivo_entregado')
+						_audit_arqueo_event(cierre, 'AUTOGUARDADO_5MIN' if is_autosave else 'GUARDADO_MANUAL', 'efectivo_entregado', old_value, cierre.efectivo_entregado)
+
+				if 'efectivo_dejado_caja_real' in fields and (('efectivo_dejado_caja_real' not in locked_fields) or is_admin_general):
+					raw_value = fields.get('efectivo_dejado_caja_real')
+					if raw_value not in ('', None) and cierre.efectivo_entregado_guardado:
+						recommended = (cierre.efectivo or 0.0) - (cierre.efectivo_entregado or 0.0)
+						old_value = cierre.efectivo_dejado_caja_real
+						cierre.efectivo_dejado_caja_recomendado = recommended
+						cierre.efectivo_dejado_caja_real = _safe_float(raw_value, old_value or 0.0)
+						cierre.diferencia_efectivo_dejado = cierre.efectivo_dejado_caja_real - recommended
+						cierre.efectivo_dejado_guardado = True
+						locked_fields.add('efectivo_dejado_caja_real')
+						_audit_arqueo_event(cierre, 'AUTOGUARDADO_5MIN' if is_autosave else 'GUARDADO_MANUAL', 'efectivo_dejado_caja_real', old_value, cierre.efectivo_dejado_caja_real)
+
+				if 'gastos' in fields and (not cierre.venta_sistema_guardada or is_admin_general):
+					incoming = fields.get('gastos') or []
+					try:
+						current_gastos = json.loads(cierre.gastos_json or '[]')
+					except (TypeError, ValueError):
+						current_gastos = []
+					by_id = {str(item.get('id')): item for item in current_gastos if item.get('id') is not None}
+					for item in incoming:
+						if _safe_float(item.get('monto'), 0.0) <= 0:
+							continue
+						item_id = str(item.get('id') or f'gasto-{len(by_id) + 1}')
+						if item_id in by_id and by_id[item_id].get('bloqueado') and not is_admin_general:
+							continue
+						item['id'] = item_id
+						item['bloqueado'] = True
+						by_id[item_id] = item
+					cierre.gastos_json = json.dumps(list(by_id.values()), ensure_ascii=True)
+					_audit_arqueo_event(cierre, 'AUTOGUARDADO_5MIN' if is_autosave else 'GUARDADO_MANUAL', 'gastos', None, list(by_id.values()))
+
+				cierre.efectivo_a_entregar = (cierre.efectivo or 0.0) - _safe_float(Sede.query.get(target_sede_id).monto_inicial_base_esperado if Sede.query.get(target_sede_id) else 0.0)
+				cierre.monto_final = _calc_cierre_operativo(cierre.monto_inicial or 0.0, cierre.pos_tarjetas or 0.0, cierre.yape or 0.0, cierre.plin or 0.0, cierre.efectivo or 0.0, cierre.venta_sistema or 0.0, json.loads(cierre.gastos_json or '[]'))['subtotal']
+				cierre.campos_bloqueados_json = json.dumps(sorted(locked_fields))
+				db.session.commit()
+				logs = ArqueoCajaHistorial.query.filter_by(id_arqueo=cierre.id_arqueo).order_by(ArqueoCajaHistorial.fecha_hora.desc()).limit(50).all()
+				logs_payload = [
+					{
+						'id': log.id_historial,
+						'fecha_hora': log.fecha_hora.strftime('%Y-%m-%d %H:%M:%S') if log.fecha_hora else '',
+						'usuario_id': log.usuario_id or '',
+						'tipo_evento': log.tipo_evento or 'GUARDADO_MANUAL',
+						'campo': log.campo_o_seccion_afectada or log.accion or '',
+						'valor_anterior': log.valor_anterior or '',
+						'valor_nuevo': log.valor_nuevo or '',
+					}
+					for log in logs
+				]
+				audit_enabled = bool(
+					cierre.venta_sistema_guardada
+					and locked_fields.intersection({'pos_tarjetas', 'yape', 'plin', 'efectivo'})
+				)
+				response_data = {
+					'ok': True,
+					'locked_fields': sorted(locked_fields),
+					'venta_sistema_guardada': bool(cierre.venta_sistema_guardada),
+					'audit_enabled': audit_enabled,
+					'efectivo_entregado_guardado': bool(cierre.efectivo_entregado_guardado),
+					'efectivo_dejado_guardado': bool(cierre.efectivo_dejado_guardado),
+					'closure_complete': bool(cierre.efectivo_dejado_guardado),
+					'logs': logs_payload,
+					'message': 'Guardado correctamente.',
+				}
+				if request.is_json:
+					return response_data
+				return redirect(url_for('arqueo', sede=target_sede_id, turno=target_turno_id))
 			if cierre is None:
 				cierre = ArqueoCaja(
 					id_sede=target_sede_id,
@@ -2566,23 +3164,100 @@ def create_app():
 					fecha=selected_date,
 				)
 				db.session.add(cierre)
+				db.session.flush()
 
-			cierre.id_usuario = current_user.id_usuario
-			cierre.monto_inicial = monto_inicial
-			cierre.pos_tarjetas = pos_tarjetas
-			cierre.yape = yape
-			cierre.plin = plin
-			cierre.efectivo = efectivo
-			cierre.venta_sistema = venta_sistema
-			cierre.gastos_json = json.dumps(gastos, ensure_ascii=True)
-			cierre.monto_final = resumen['subtotal']
-			cierre.observaciones = request.form.get('observaciones', '').strip()
-
+			if section == 'observaciones':
+				old_value = cierre.observaciones or ''
+				new_value = request.form.get('observaciones', '').strip()
+				if old_value != new_value:
+					_audit_arqueo(cierre, 'ACTUALIZAR_OBSERVACION', old_value, new_value)
+					cierre.observaciones = new_value
+			elif section == 'section1':
+				if cierre.seccion_1_guardada and not is_admin_general:
+					flash('La Seccion 1 ya esta bloqueada para Administrador de Sala.', 'error')
+					return redirect(url_for('arqueo'))
+				if not request.form.get('monto_inicial', '').strip():
+					flash('El Monto Base Colocado es obligatorio.', 'error')
+					return redirect(url_for('arqueo', sede=target_sede_id, turno=target_turno_id) if is_admin_general else url_for('arqueo'))
+				monto_inicial = _safe_float(request.form.get('monto_inicial'), 0.0)
+				pos_tarjetas = _safe_float(request.form.get('pos_tarjetas'), 0.0)
+				yape = _safe_float(request.form.get('yape'), 0.0)
+				plin = _safe_float(request.form.get('plin'), 0.0)
+				efectivo = _safe_float(request.form.get('efectivo'), 0.0)
+				venta_sistema = _safe_float(request.form.get('venta_sistema'), 0.0)
+				gastos = _parse_gastos_from_form(request.form)
+				old_value = {
+					'monto_inicial': cierre.monto_inicial,
+					'pos_tarjetas': cierre.pos_tarjetas,
+					'yape': cierre.yape,
+					'plin': cierre.plin,
+					'efectivo': cierre.efectivo,
+					'venta_sistema': cierre.venta_sistema,
+					'gastos': cierre.gastos_json or '[]',
+				}
+				cierre.monto_inicial = monto_inicial
+				cierre.pos_tarjetas = pos_tarjetas
+				cierre.yape = yape
+				cierre.plin = plin
+				cierre.efectivo = efectivo
+				cierre.venta_sistema = venta_sistema
+				cierre.gastos_json = json.dumps(gastos, ensure_ascii=True)
+				cierre.monto_final = _calc_cierre_operativo(monto_inicial, pos_tarjetas, yape, plin, efectivo, venta_sistema, gastos)['subtotal']
+				cierre.seccion_1_guardada = True
+				_audit_arqueo(cierre, 'MODIFICAR_GASTO' if old_value['gastos'] != cierre.gastos_json else 'GUARDAR_SECCION_1', old_value, {
+					'monto_inicial': monto_inicial, 'pos_tarjetas': pos_tarjetas, 'yape': yape,
+					'plin': plin, 'efectivo': efectivo, 'venta_sistema': venta_sistema, 'gastos': gastos,
+				})
+			elif section == 'efectivo_entregado':
+				if not cierre.seccion_1_guardada and not is_admin_general:
+					flash('Primero debes guardar la Seccion 1.', 'error')
+					return redirect(url_for('arqueo'))
+				if cierre.efectivo_entregado_guardado and not is_admin_general:
+					flash('El efectivo entregado ya esta bloqueado.', 'error')
+					return redirect(url_for('arqueo'))
+				if not request.form.get('efectivo_entregado', '').strip():
+					flash('El efectivo entregado es obligatorio.', 'error')
+					return redirect(url_for('arqueo'))
+				old_value = cierre.efectivo_entregado
+				cierre.efectivo_entregado = _safe_float(request.form.get('efectivo_entregado'), 0.0)
+				cierre.efectivo_a_entregar = cierre.efectivo - _safe_float(Sede.query.get(target_sede_id).monto_inicial_base_esperado if Sede.query.get(target_sede_id) else 0.0)
+				cierre.efectivo_entregado_guardado = True
+				_audit_arqueo(cierre, 'GUARDAR_EFECTIVO_ENTREGADO', old_value, cierre.efectivo_entregado)
+			elif section == 'efectivo_dejado':
+				if not cierre.efectivo_entregado_guardado and not is_admin_general:
+					flash('Primero debes guardar el efectivo entregado.', 'error')
+					return redirect(url_for('arqueo'))
+				if cierre.efectivo_dejado_guardado and not is_admin_general:
+					flash('El efectivo dejado en caja ya esta bloqueado.', 'error')
+					return redirect(url_for('arqueo'))
+				if not request.form.get('efectivo_dejado_caja_real', '').strip():
+					flash('El efectivo dejado en caja es obligatorio.', 'error')
+					return redirect(url_for('arqueo'))
+				recommended = cierre.efectivo - cierre.efectivo_entregado
+				real_value = _safe_float(request.form.get('efectivo_dejado_caja_real'), 0.0)
+				old_value = {'real': cierre.efectivo_dejado_caja_real, 'difference': cierre.diferencia_efectivo_dejado}
+				cierre.efectivo_dejado_caja_recomendado = recommended
+				cierre.efectivo_dejado_caja_real = real_value
+				cierre.diferencia_efectivo_dejado = real_value - recommended
+				cierre.efectivo_dejado_guardado = True
+				_audit_arqueo(cierre, 'GUARDAR_EFECTIVO_DEJADO', old_value, {'real': real_value, 'difference': cierre.diferencia_efectivo_dejado})
+			elif section == 'propina':
+				gastos = json.loads(cierre.gastos_json or '[]')
+				new_value = _safe_float(request.form.get('propina_monto'), 0.0)
+				old_value = next((_safe_float(item.get('monto')) for item in gastos if item.get('tipo') == 'Propina'), 0.0)
+				if not is_admin_general and new_value < old_value:
+					flash('La propina solo puede aumentarse.', 'error')
+					return redirect(url_for('arqueo'))
+				propina = next((item for item in gastos if item.get('tipo') == 'Propina'), None)
+				if propina:
+					propina['monto'] = new_value
+				else:
+					gastos.append({'nombre': 'Propina', 'tipo': 'Propina', 'monto': new_value})
+				cierre.gastos_json = json.dumps(gastos, ensure_ascii=True)
+				_audit_arqueo(cierre, 'MODIFICAR_PROPINA', old_value, new_value)
 			db.session.commit()
-			flash('Cierre de caja guardado para esta sede y turno.', 'ok')
-			if is_admin_general:
-				return redirect(url_for('arqueo', sede=target_sede_id, turno=target_turno_id))
-			return redirect(url_for('arqueo'))
+			flash('Cambios de cierre guardados.', 'ok')
+			return redirect(url_for('arqueo', sede=target_sede_id, turno=target_turno_id) if is_admin_general else url_for('arqueo'))
 
 		if cierre and cierre.gastos_json:
 			try:
@@ -2598,6 +3273,20 @@ def create_app():
 		plin = _safe_float(cierre.plin if cierre else 0.0, 0.0)
 		efectivo = _safe_float(cierre.efectivo if cierre else 0.0, 0.0)
 		venta_sistema = _safe_float(cierre.venta_sistema if cierre else 0.0, 0.0)
+		try:
+			locked_fields = json.loads(cierre.campos_bloqueados_json or '[]') if cierre else []
+		except (TypeError, ValueError):
+			locked_fields = []
+		if cierre and cierre.seccion_1_guardada:
+			locked_fields = sorted(set(locked_fields).union({'monto_inicial', 'pos_tarjetas', 'yape', 'plin', 'efectivo', 'venta_sistema'}))
+		if cierre and cierre.efectivo_entregado_guardado:
+			locked_fields = sorted(set(locked_fields).union({'efectivo_entregado'}))
+		if cierre and cierre.efectivo_dejado_guardado:
+			locked_fields = sorted(set(locked_fields).union({'efectivo_dejado_caja_real'}))
+		audit_enabled = bool(
+			cierre and cierre.venta_sistema_guardada
+			and set(locked_fields).intersection({'pos_tarjetas', 'yape', 'plin', 'efectivo'})
+		)
 		resumen = _calc_cierre_operativo(
 			monto_inicial,
 			pos_tarjetas,
@@ -2619,6 +3308,9 @@ def create_app():
 				ArqueoCaja.id_turno == current_user.id_turno,
 			)
 		historial_cierres = historial_query.order_by(ArqueoCaja.id_arqueo.desc()).limit(20).all()
+		historial_auditoria = []
+		if cierre:
+			historial_auditoria = ArqueoCajaHistorial.query.filter_by(id_arqueo=cierre.id_arqueo).order_by(ArqueoCajaHistorial.fecha_hora.desc()).limit(50).all()
 
 		sedes_disponibles = []
 		turnos_disponibles = []
@@ -2631,15 +3323,21 @@ def create_app():
 			allowed_views=_allowed_views(current_user),
 			cierre=cierre,
 			gastos_actuales=gastos_actuales,
+			efectivo=efectivo,
 			resumen=resumen,
 			historial_cierres=historial_cierres,
+			historial_auditoria=historial_auditoria,
 			target_sede_id=target_sede_id,
 			target_turno_id=target_turno_id,
 			sedes_disponibles=sedes_disponibles,
 			turnos_disponibles=turnos_disponibles,
 			is_admin_general=is_admin_general,
-			can_insert=current_user.can_write('arqueo', 'insert'),
+			locked_fields=locked_fields,
+			audit_enabled=audit_enabled,
+				can_insert=current_user.can_write('arqueo', 'insert'),
 			can_update=current_user.can_write('arqueo', 'update'),
+				# Monto inicial base esperado por sede (solo admin_general lo configura)
+				expected_base=(Sede.query.get(target_sede_id).monto_inicial_base_esperado if Sede.query.get(target_sede_id) else 0.0),
 			loop_month=selected_date.strftime('%Y-%m') if is_admin_general else '',
 		)
 
@@ -2677,7 +3375,7 @@ def create_app():
 				+ _safe_float(arqueo.plin, 0.0)
 				+ _safe_float(arqueo.efectivo, 0.0)
 			)
-			gastos_totales = subtotal - total_ingresos
+			gastos_totales = total_ingresos - subtotal
 			diferencia = (subtotal - monto_inicial) - venta_sistema
 			estado = 'Cuadre exacto'
 			if diferencia > 0:
@@ -2787,9 +3485,9 @@ def create_app():
 			'recaudacion_real': [round(sede_turno_rollup[label]['ingresos'], 2) for label in bar_labels],
 		}
 
-		total_pos = sum(sede_rollup[label]['pos'] for label in bar_labels)
-		total_digital = sum(sede_rollup[label]['digital'] for label in bar_labels)
-		total_efectivo = sum(sede_rollup[label]['efectivo'] for label in bar_labels)
+		total_pos = sum(item['pos'] for item in sede_rollup.values())
+		total_digital = sum(item['digital'] for item in sede_rollup.values())
+		total_efectivo = sum(item['efectivo'] for item in sede_rollup.values())
 		chart_pie = {
 			'labels': ['POS', 'Yape/Plin', 'Efectivo'],
 			'values': [round(total_pos, 2), round(total_digital, 2), round(total_efectivo, 2)],
@@ -2828,7 +3526,7 @@ def create_app():
 				+ _safe_float(arqueo.plin, 0.0)
 				+ _safe_float(arqueo.efectivo, 0.0)
 			)
-			gastos = _safe_float(arqueo.monto_final, 0.0) - total_ing
+			gastos = total_ing - _safe_float(arqueo.monto_final, 0.0)
 			trend_sede_data[sede_label][fecha_key] += gastos
 
 		palette = ['#E6C682', '#4A4A4A', '#2D2D2D', '#B98E38', '#7A7A7A']
@@ -2906,7 +3604,7 @@ def create_app():
 				+ _safe_float(arqueo.plin, 0.0)
 				+ _safe_float(arqueo.efectivo, 0.0)
 			)
-			gastos_item = _safe_float(arqueo.monto_final, 0.0) - total_ingresos_item
+			gastos_item = total_ingresos_item - _safe_float(arqueo.monto_final, 0.0)
 			ganancia_item = _safe_float(arqueo.monto_final, 0.0) - _safe_float(arqueo.monto_inicial, 0.0)
 
 			if arqueo.fecha and arqueo.fecha >= week_start:
@@ -2936,7 +3634,208 @@ def create_app():
 			chart_benchmark=chart_benchmark,
 			chart_ganancia_gastos=chart_ganancia_gastos,
 			comparacion_turnos=comparacion_turnos,
+			sedes_disponibles=Sede.query.order_by(Sede.nombre_sede.asc()).all() if is_admin_general else [],
+			turnos_disponibles=Turno.query.order_by(Turno.nombre_turno.asc()).all() if is_admin_general else [],
 		)
+
+	@app.route('/arqueo/dashboard/data', methods=['GET'])
+	@login_required
+	def arqueo_dashboard_data():
+		if not current_user.can_view('arqueo'):
+			return jsonify({'error': 'forbidden'}), 403
+		date_start, date_end = _arqueo_period_params(request.args, current_user)
+		sede_ids = [int(value) for value in request.args.getlist('sede') if value.isdigit()] if current_user.rol_nombre == 'admin_general' else None
+		turno_ids = request.args.getlist('turno') if current_user.rol_nombre == 'admin_general' else None
+		rows = _arqueo_report_rows(date_start, date_end, current_user, sede_ids, turno_ids)
+		items = []
+		for arqueo, sede, turno, usuario in rows:
+			try: gastos = json.loads(arqueo.gastos_json or '[]')
+			except (TypeError, ValueError): gastos = []
+			total_ingresos, gastos_total, subtotal, operativo, diferencia = _report_metrics(arqueo, gastos)
+			items.append({'fecha': arqueo.fecha.isoformat(), 'sede': sede.nombre_sede if sede else str(arqueo.id_sede), 'turno': turno.nombre_turno if turno else arqueo.id_turno, 'ingresos': total_ingresos, 'gastos': gastos_total, 'subtotal': subtotal, 'venta_sistema': _safe_float(arqueo.venta_sistema), 'diferencia': diferencia, 'efectivo_entregado': _safe_float(arqueo.efectivo_entregado), 'efectivo_dejado': _safe_float(arqueo.efectivo_dejado_caja_real)})
+		return jsonify({'date_start': date_start.isoformat(), 'date_end': date_end.isoformat(), 'items': items, 'role': current_user.rol_nombre})
+
+	def _arqueo_period_params(args, user):
+		today = _get_selected_app_date()
+		period = (args.get('period') or 'month').strip()
+		start_raw = (args.get('date_start') or '').strip()
+		end_raw = (args.get('date_end') or '').strip()
+		try:
+			date_start = datetime.strptime(start_raw, '%Y-%m-%d').date() if start_raw else None
+			date_end = datetime.strptime(end_raw, '%Y-%m-%d').date() if end_raw else None
+		except ValueError:
+			date_start = date_end = None
+		if not date_start or not date_end:
+			if period == 'week':
+				date_start = today - timedelta(days=today.weekday())
+				date_end = date_start + timedelta(days=6)
+			elif period == 'last_month':
+				first = today.replace(day=1)
+				date_end = first - timedelta(days=1)
+				date_start = date_end.replace(day=1)
+			else:
+				date_start = today.replace(day=1)
+				date_end = today
+		return date_start, date_end
+
+
+	def _arqueo_report_rows(date_start, date_end, user, sede_ids=None, turno_ids=None):
+		query = db.session.query(ArqueoCaja, Sede, Turno, Usuario).outerjoin(
+			Sede, Sede.id_sede == ArqueoCaja.id_sede
+		).outerjoin(Turno, Turno.id_turno == ArqueoCaja.id_turno).outerjoin(
+			Usuario, Usuario.id_usuario == ArqueoCaja.id_usuario
+		).filter(ArqueoCaja.fecha >= date_start, ArqueoCaja.fecha <= date_end)
+		if user.rol_nombre != 'admin_general':
+			query = query.filter(ArqueoCaja.id_sede == user.id_sede, ArqueoCaja.id_turno == user.id_turno)
+		else:
+			if sede_ids:
+				query = query.filter(ArqueoCaja.id_sede.in_(sede_ids))
+			if turno_ids:
+				query = query.filter(ArqueoCaja.id_turno.in_(turno_ids))
+		return query.order_by(ArqueoCaja.fecha.asc(), ArqueoCaja.id_arqueo.asc()).all()
+
+
+	def _report_metrics(arqueo, gastos):
+		total_ingresos = sum(_safe_float(getattr(arqueo, field), 0.0) for field in ('pos_tarjetas', 'yape', 'plin', 'efectivo'))
+		gastos_total = sum(_safe_float(item.get('monto'), 0.0) for item in gastos)
+		subtotal = total_ingresos - gastos_total
+		operativo = subtotal - _safe_float(arqueo.monto_inicial, 0.0)
+		diferencia = operativo - _safe_float(arqueo.venta_sistema, 0.0)
+		return total_ingresos, gastos_total, subtotal, operativo, diferencia
+
+
+	@app.route('/arqueo/export_report', methods=['GET'])
+	@login_required
+	def arqueo_export_report():
+		if not current_user.can_view('arqueo'):
+			return _forbidden_redirect()
+		date_start, date_end = _arqueo_period_params(request.args, current_user)
+		sede_ids = [int(value) for value in request.args.getlist('sede') if value.isdigit()] if current_user.rol_nombre == 'admin_general' else None
+		turno_ids = request.args.getlist('turno') if current_user.rol_nombre == 'admin_general' else None
+		rows = _arqueo_report_rows(date_start, date_end, current_user, sede_ids, turno_ids)
+		wb = Workbook()
+		ws_summary = wb.active
+		ws_summary.title = 'Resumen Ejecutivo'
+		ws_detail = wb.create_sheet('Arqueos Detalle')
+		ws_expenses = wb.create_sheet('Gastos')
+		ws_channels = wb.create_sheet('Ingresos por Canal')
+		ws_audit = wb.create_sheet('Auditoria')
+		ws_week = wb.create_sheet('Comparativo Semanal')
+		ws_month = wb.create_sheet('Comparativo Mensual')
+		dark_fill = PatternFill('solid', fgColor='263238')
+		money_fmt = '$ #,##0.00'
+		for sheet in wb.worksheets:
+			sheet.sheet_view.showGridLines = False
+
+		prepared = []
+		all_expenses = []
+		for arqueo, sede, turno, usuario in rows:
+			try:
+				gastos = json.loads(arqueo.gastos_json or '[]')
+			except (TypeError, ValueError):
+				gastos = []
+			metrics = _report_metrics(arqueo, gastos)
+			prepared.append((arqueo, sede, turno, usuario, gastos, metrics))
+			for index, item in enumerate(gastos, 1):
+				all_expenses.append((f'{arqueo.id_arqueo}-{index}', arqueo, sede, turno, item, metrics[1]))
+
+		values = [item[5] for item in prepared]
+		total_ingresos = sum(item[0] for item in values)
+		total_gastos = sum(item[1] for item in values)
+		total_subtotal = sum(item[2] for item in values)
+		total_operativo = sum(item[3] for item in values)
+		total_venta = sum(_safe_float(item[0].venta_sistema, 0.0) for item in prepared)
+		total_diferencia = sum(item[4] for item in values)
+		total_entregado = sum(_safe_float(item[0].efectivo_entregado, 0.0) for item in prepared)
+		total_dejado = sum(_safe_float(item[0].efectivo_dejado_caja_real, 0.0) for item in prepared)
+		ws_summary.append([f'Arqueo de Caja - Reporte Periodo {date_start} a {date_end}'])
+		ws_summary.append([])
+		for label, value in [('Total Ingresos', total_ingresos), ('Total Gastos', total_gastos), ('Subtotal', total_subtotal), ('Total Operativo', total_operativo), ('Venta Sistema total', total_venta), ('Diferencia vs Sistema', total_diferencia), ('Porcentaje de descuadre', total_diferencia / total_venta if total_venta else 0), ('Efectivo Entregado total', total_entregado), ('Efectivo Dejado en Caja total', total_dejado), ('Diferencia promedio efectivo dejado', sum(_safe_float(item[0].diferencia_efectivo_dejado, 0.0) for item in prepared) / len(prepared) if prepared else 0), ('N de cierres', len(prepared))]:
+			ws_summary.append([label, value])
+		ws_summary.column_dimensions['A'].width = 38
+		ws_summary.column_dimensions['B'].width = 22
+		ws_summary['A1'].font = Font(size=16, bold=True)
+		for row in ws_summary.iter_rows(min_row=3, max_col=2):
+			row[0].font = Font(bold=True)
+			if isinstance(row[1].value, (int, float)):
+				row[1].number_format = '0.00% ' if row[0].value == 'Porcentaje de descuadre' else money_fmt
+		ws_summary.conditional_formatting.add('B8', CellIsRule(operator='greaterThan', formula=['0.02'], fill=PatternFill('solid', fgColor='FFC7CE')))
+
+		detail_headers = ['ID Arqueo', 'Fecha', 'Sede', 'Turno', 'Monto Inicial', 'Venta Sistema', 'POS', 'Yape', 'Plin', 'Efectivo', 'Total Ingresos', 'Gastos Totales', 'Subtotal', 'Total Operativo', 'Efectivo Entregado', 'Efectivo Dejado Real', 'Diferencia Efectivo Dejado', 'Diferencia vs Sistema', 'Observaciones']
+		ws_detail.append(detail_headers)
+		for index, (arqueo, sede, turno, usuario, gastos, metrics) in enumerate(prepared, 2):
+			total_ingresos_item, gastos_totales_item, subtotal_item, total_operativo_item, diferencia_item = metrics
+			efectivo_dejado_real = _safe_float(getattr(arqueo, 'efectivo_dejado_caja_real', 0.0), 0.0)
+			diferencia_efectivo_dejado = _safe_float(getattr(arqueo, 'diferencia_efectivo_dejado', 0.0), 0.0)
+			ws_detail.append([arqueo.id_arqueo, arqueo.fecha, sede.nombre_sede if sede else '', turno.nombre_turno if turno else arqueo.id_turno, _safe_float(arqueo.monto_inicial), _safe_float(arqueo.venta_sistema), _safe_float(arqueo.pos_tarjetas), _safe_float(arqueo.yape), _safe_float(arqueo.plin), _safe_float(arqueo.efectivo), total_ingresos_item, gastos_totales_item, subtotal_item, total_operativo_item, _safe_float(arqueo.efectivo_entregado), efectivo_dejado_real, diferencia_efectivo_dejado, diferencia_item, arqueo.observaciones or ''])
+		ws_detail.freeze_panes = 'A2'
+		ws_detail.auto_filter.ref = f'A1:S{max(ws_detail.max_row, 2)}'
+		for column in range(5, 19):
+			for cell in ws_detail.iter_cols(min_col=column, max_col=column, min_row=2):
+				for value in cell: value.number_format = money_fmt
+
+		ws_expenses.append(['ID Gasto', 'ID Arqueo', 'Fecha', 'Sede', 'Turno', 'Tipo Gasto', 'Nombre', 'Monto', '% del Total Gastos'])
+		for expense_id, arqueo, sede, turno, item, total in all_expenses:
+			ws_expenses.append([expense_id, arqueo.id_arqueo, arqueo.fecha, sede.nombre_sede if sede else '', turno.nombre_turno if turno else arqueo.id_turno, item.get('tipo', 'Otros'), item.get('nombre', ''), _safe_float(item.get('monto')), _safe_float(item.get('monto')) / total if total else 0])
+		ws_expenses.freeze_panes = 'A2'
+		ws_channels.append(['ID Arqueo', 'Fecha', 'Sede', 'Turno', 'Canal', 'Monto'])
+		for arqueo, sede, turno, usuario, gastos, metrics in prepared:
+			for channel in ('pos_tarjetas', 'yape', 'plin', 'efectivo'):
+				ws_channels.append([arqueo.id_arqueo, arqueo.fecha, sede.nombre_sede if sede else '', turno.nombre_turno if turno else arqueo.id_turno, channel, _safe_float(getattr(arqueo, channel))])
+		ws_audit.append(['ID Historial', 'Fecha Hora', 'Usuario', 'Tipo Evento', 'Campo/Sección', 'Valor Anterior', 'Valor Nuevo'])
+		if prepared:
+			audit_rows = ArqueoCajaHistorial.query.filter(ArqueoCajaHistorial.id_arqueo.in_([item[0].id_arqueo for item in prepared])).order_by(ArqueoCajaHistorial.fecha_hora.asc()).all()
+			for log in audit_rows: ws_audit.append([log.id_historial, log.fecha_hora, log.usuario_id, log.tipo_evento, log.campo_o_seccion_afectada or log.accion, log.valor_anterior, log.valor_nuevo])
+
+		for sheet in (ws_detail, ws_expenses, ws_channels, ws_audit):
+			for cell in sheet[1]: cell.font = Font(bold=True, color='FFFFFF'); cell.fill = dark_fill
+			for cell in sheet[1]: sheet.column_dimensions[cell.column_letter].width = max(14, min(34, len(str(cell.value)) + 3))
+		ws_week.append(['Semana', 'Fecha Inicio', 'Fecha Fin', 'Total Ingresos', 'Total Gastos', 'Subtotal', 'Venta Sistema', 'Diferencia', '% Descuadre', 'Efectivo Entregado', 'Efectivo Dejado'])
+		weekly = defaultdict(lambda: [0.0] * 7)
+		for arqueo, sede, turno, usuario, gastos, metrics in prepared:
+			key = arqueo.fecha.isocalendar().week
+			weekly[key][0] += metrics[0]; weekly[key][1] += metrics[1]; weekly[key][2] += metrics[2]; weekly[key][3] += _safe_float(arqueo.venta_sistema); weekly[key][4] += metrics[4]; weekly[key][5] += _safe_float(arqueo.efectivo_entregado); weekly[key][6] += _safe_float(arqueo.efectivo_dejado_caja_real)
+		for week, values_week in sorted(weekly.items()):
+			ws_week.append([week, '', '', *values_week[:4], values_week[4], values_week[4] / values_week[3] if values_week[3] else 0, values_week[5], values_week[6]])
+		ws_month.append(['Mes', 'Total Ingresos', 'Total Gastos', 'Subtotal', 'Venta Sistema', 'Diferencia', '% Descuadre'])
+		monthly = defaultdict(lambda: [0.0] * 5)
+		for arqueo, sede, turno, usuario, gastos, metrics in prepared:
+			key = arqueo.fecha.strftime('%Y-%m'); monthly[key][0] += metrics[0]; monthly[key][1] += metrics[1]; monthly[key][2] += metrics[2]; monthly[key][3] += _safe_float(arqueo.venta_sistema); monthly[key][4] += metrics[4]
+		for month, values_month in sorted(monthly.items()): ws_month.append([month, *values_month, values_month[4] / values_month[3] if values_month[3] else 0])
+		for sheet in (ws_week, ws_month):
+			for cell in sheet[1]: cell.font = Font(bold=True, color='FFFFFF'); cell.fill = dark_fill
+			for row in sheet.iter_rows(min_row=2):
+				for cell in row[3:]: cell.number_format = '0.00%' if cell.column == 9 or (sheet == ws_month and cell.column == 7) else money_fmt
+		# Hoja de Gastos Operativos con detalle del cierre actual
+		ws_operativos = wb.create_sheet('Gastos Operativos')
+		ws_operativos.append(['Fecha y Hora', 'Categoria / Tipo de Gasto', 'Descripcion / Detalle', 'Monto'])
+		operativos_total = 0.0
+		for arqueo, sede, turno, usuario in rows:
+			fecha_hora = (arq := arqueo.fecha).isoformat() if arqueo.fecha else ''
+			for item in _safe_json_list(arqueo.gastos_json):
+				monto = _safe_float(item.get('monto'), 0.0)
+				operativos_total += monto
+				ws_operativos.append([
+					fecha_hora,
+					item.get('tipo') or 'Otros',
+					item.get('nombre') or 'Sin detalle',
+					monto,
+				])
+		ws_operativos.append([])
+		ws_operativos.append(['TOTAL GASTOS OPERATIVOS', '', '', operativos_total])
+		for cell in ws_operativos[1]:
+			cell.font = Font(bold=True, color='FFFFFF')
+			cell.fill = dark_fill
+		for row in ws_operativos.iter_rows(min_row=2, max_row=ws_operativos.max_row):
+			for cell in row[3:4]:
+				cell.number_format = money_fmt
+		# Usar filtros normales en lugar de tablas estructuradas para mantener
+		# compatibilidad con Excel y evitar reparaciones del libro descargado.
+		for sheet in (ws_detail, ws_expenses, ws_channels, ws_audit, ws_week, ws_month, ws_operativos):
+			if sheet.max_row >= 2 and sheet.max_column >= 1:
+				sheet.auto_filter.ref = f'A1:{sheet.cell(sheet.max_row, sheet.max_column).coordinate}'
+		buffer = BytesIO(); wb.save(buffer); buffer.seek(0)
+		return send_file(buffer, as_attachment=True, download_name=f'reporte_arqueo_{date_start}_{date_end}.xlsx', mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
 	@app.route('/arqueo/export_month', methods=['GET'])
 	@login_required
@@ -2988,7 +3887,7 @@ def create_app():
 			ws = wb.create_sheet(title=(sede_name[:31] or 'Sede'))
 			headers = [
 				'ID Arqueo', 'Sede', 'Turno', 'Fecha', 'Usuario (cierre)', 'Monto inicial', 'Venta sistema', 'Monto final',
-				'POS tarjetas', 'Yape', 'Plin', 'Efectivo', 'Gastos (JSON)', 'Observaciones'
+				'POS tarjetas', 'Yape', 'Plin', 'Efectivo', 'Efectivo Dejado Real', 'Diferencia Efectivo Dejado', 'Gastos (JSON)', 'Observaciones'
 			]
 			ws.append(headers)
 			for arqueo, sede, turno, usuario in items:
@@ -3005,6 +3904,8 @@ def create_app():
 					_safe_float(arqueo.yape, 0.0),
 					_safe_float(arqueo.plin, 0.0),
 					_safe_float(arqueo.efectivo, 0.0),
+					_safe_float(getattr(arqueo, 'efectivo_dejado_caja_real', 0.0), 0.0),
+					_safe_float(getattr(arqueo, 'diferencia_efectivo_dejado', 0.0), 0.0),
 					(arqueo.gastos_json or ''),
 					(arqueo.observaciones or ''),
 				])
@@ -3033,6 +3934,80 @@ def create_app():
 					flash('Nombre de sede requerido.', 'error')
 					return redirect(url_for('ajustes'))
 				db.session.add(Sede(nombre_sede=nombre_sede))
+			elif tipo_form == 'update_sede':
+				try:
+					sede_id = int(request.form.get('id_sede', ''))
+				except (TypeError, ValueError):
+					flash('Sede invalida.', 'error')
+					return redirect(url_for('ajustes'))
+				nombre_sede = request.form.get('nombre_sede', '').strip()
+				sede = Sede.query.get(sede_id)
+				if not sede or not nombre_sede:
+					flash('La sede y su nombre son obligatorios.', 'error')
+					return redirect(url_for('ajustes'))
+				sede.nombre_sede = nombre_sede
+			elif tipo_form == 'delete_sede':
+				try:
+					sede_id = int(request.form.get('id_sede', ''))
+				except (TypeError, ValueError):
+					flash('Sede invalida.', 'error')
+					return redirect(url_for('ajustes'))
+				sede = Sede.query.get(sede_id)
+				if not sede:
+					flash('Sede no encontrada.', 'error')
+					return redirect(url_for('ajustes'))
+				in_use = any((
+					Usuario.query.filter_by(id_sede=sede_id).first(),
+					InventarioSede.query.filter_by(id_sede=sede_id).first(),
+					ChecklistPedido.query.filter_by(id_sede=sede_id).first(),
+					ArqueoCaja.query.filter_by(id_sede=sede_id).first(),
+					RecordatorioCierre.query.filter_by(id_sede=sede_id).first(),
+				))
+				if in_use:
+					flash('No se puede eliminar una sede con datos asociados. Puedes editar su nombre.', 'error')
+					return redirect(url_for('ajustes'))
+				db.session.delete(sede)
+			elif tipo_form == 'recordatorio_cierre':
+				try:
+					id_sede = int(request.form.get('id_sede'))
+				except (TypeError, ValueError):
+					flash('Sede invalida.', 'error')
+					return redirect(url_for('ajustes'))
+				id_turno = request.form.get('id_turno', '').strip()
+				hora_cierre = request.form.get('hora_cierre', '').strip()
+				if not id_turno or not re.match(r'^([01]\d|2[0-3]):[0-5]\d$', hora_cierre):
+					flash('Hora de cierre invalida.', 'error')
+					return redirect(url_for('ajustes'))
+				recordatorio = RecordatorioCierre.query.filter_by(id_sede=id_sede, id_turno=id_turno).first()
+				if not recordatorio:
+					recordatorio = RecordatorioCierre(id_sede=id_sede, id_turno=id_turno)
+					db.session.add(recordatorio)
+				recordatorio.hora_cierre = hora_cierre
+				recordatorio.activo = request.form.get('activo') == 'on'
+			elif tipo_form == 'update_recordatorio':
+				try:
+					recordatorio_id = int(request.form.get('id_recordatorio', ''))
+				except (TypeError, ValueError):
+					flash('Recordatorio invalido.', 'error')
+					return redirect(url_for('ajustes'))
+				recordatorio = RecordatorioCierre.query.get(recordatorio_id)
+				hora_cierre = request.form.get('hora_cierre', '').strip()
+				id_turno = request.form.get('id_turno', '').strip()
+				if not recordatorio or not id_turno or not re.match(r'^([01]\d|2[0-3]):[0-5]\d$', hora_cierre):
+					flash('Datos invalidos para el recordatorio.', 'error')
+					return redirect(url_for('ajustes'))
+				recordatorio.id_turno = id_turno
+				recordatorio.hora_cierre = hora_cierre
+				recordatorio.activo = request.form.get('activo') == 'on'
+			elif tipo_form == 'delete_recordatorio':
+				try:
+					recordatorio_id = int(request.form.get('id_recordatorio', ''))
+				except (TypeError, ValueError):
+					flash('Recordatorio invalido.', 'error')
+					return redirect(url_for('ajustes'))
+				recordatorio = RecordatorioCierre.query.get(recordatorio_id)
+				if recordatorio:
+					db.session.delete(recordatorio)
 			elif tipo_form == 'usuario':
 				new_id = request.form.get('id_usuario', '').strip()
 				new_username = request.form.get('username', '').strip()
@@ -3088,9 +4063,9 @@ def create_app():
 						id_usuario=new_id,
 						username=new_username,
 						password_hash=generate_password_hash(new_password) if new_password else usuario.password_hash,
-						id_rol=usuario.id_rol,
-						id_sede=usuario.id_sede,
-						id_turno=usuario.id_turno,
+						id_rol=int(request.form.get('id_rol', usuario.id_rol)),
+						id_sede=int(request.form.get('id_sede', usuario.id_sede)),
+						id_turno=request.form.get('id_turno', usuario.id_turno),
 					)
 					db.session.add(replacement)
 					db.session.flush()
@@ -3104,6 +4079,9 @@ def create_app():
 					db.session.delete(usuario)
 				else:
 					usuario.username = new_username
+					usuario.id_rol = int(request.form.get('id_rol', usuario.id_rol))
+					usuario.id_sede = int(request.form.get('id_sede', usuario.id_sede))
+					usuario.id_turno = request.form.get('id_turno', usuario.id_turno)
 					if new_password:
 						usuario.password_hash = generate_password_hash(new_password)
 
@@ -3133,17 +4111,45 @@ def create_app():
 				db.session.commit()
 				flash('Usuario eliminado correctamente.', 'ok')
 				return redirect(url_for('ajustes'))
+			elif tipo_form == 'sede_base':
+				# Actualizar monto inicial base esperado para una sede (solo admin_general lo hace)
+				if current_user.rol_nombre != 'admin_general':
+					return _forbidden_redirect()
+				sede_id = request.form.get('id_sede')
+				valor = request.form.get('monto_inicial_base_esperado', '').strip()
+				try:
+					valor_f = float(valor) if valor != '' else 0.0
+				except ValueError:
+					flash('Valor invalido para monto inicial base.', 'error')
+					return redirect(url_for('ajustes'))
+				try:
+					sede_id_int = int(sede_id)
+				except Exception:
+					sede_id_int = None
+				sede = Sede.query.filter_by(id_sede=sede_id_int).first()
+				if not sede:
+					flash('Sede no encontrada.', 'error')
+					return redirect(url_for('ajustes'))
+				sede.monto_inicial_base_esperado = valor_f
 
 			db.session.commit()
 			flash('Configuracion guardada.', 'ok')
 
+		sedes = Sede.query.order_by(Sede.nombre_sede).all()
+		roles = Rol.query.order_by(Rol.nombre_rol).all()
+		turnos = Turno.query.order_by(Turno.nombre_turno).all()
+		usuarios = Usuario.query.order_by(Usuario.username).all()
+		recordatorios = RecordatorioCierre.query.order_by(RecordatorioCierre.id_sede, RecordatorioCierre.id_turno).all()
 		return render_template(
 			'admin/ajustes.html',
 			allowed_views=_allowed_views(current_user),
-			sedes=Sede.query.order_by(Sede.nombre_sede).all(),
-			roles=Rol.query.order_by(Rol.nombre_rol).all(),
-			turnos=Turno.query.order_by(Turno.nombre_turno).all(),
-			usuarios=Usuario.query.order_by(Usuario.username).limit(20).all(),
+			sedes=sedes,
+			roles=roles,
+			turnos=turnos,
+			usuarios=usuarios,
+			recordatorios=recordatorios,
+			sede_names={s.id_sede: s.nombre_sede for s in sedes},
+			turno_names={t.id_turno: t.nombre_turno for t in turnos},
 		)
 
 	@app.context_processor
@@ -3160,10 +4166,15 @@ def create_app():
 				app_date = _get_operation_date()
 				selected_date = app_date.strftime('%Y-%m-%d')
 				session['app_date'] = selected_date
+		reminder = None
+		if current_user.is_authenticated and current_user.rol_nombre == 'admin_sala' and current_user.id_sede and current_user.id_turno:
+			reminder = RecordatorioCierre.query.filter_by(id_sede=current_user.id_sede, id_turno=current_user.id_turno, activo=True).first()
 		return {
+			'allowed_views': _allowed_views(current_user) if current_user.is_authenticated else [],
 			'today_text': app_date.strftime('%d/%m/%Y'),
 			'today_value': selected_date,
 			'current_date_obj': app_date.date(),
+			'cierre_reminder': {'time': reminder.hora_cierre, 'sede': reminder.id_sede, 'turno': reminder.id_turno} if reminder else None,
 		}
 
 	return app

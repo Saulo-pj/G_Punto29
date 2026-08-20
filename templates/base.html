@@ -18,6 +18,8 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <script>
         window.INVENTORY_AREA_OPTIONS = {{ areas_subareas|tojson if areas_subareas is defined else '{}' }};
+        window.CIERRE_REMINDER = {{ cierre_reminder|default(none)|tojson }};
+        window.CURRENT_ROLE = {{ current_user.rol_nombre|default('')|tojson }};
     </script>
     <script defer src="{{ url_for('static', filename='js/inventario.js') }}"></script>
 </head>
@@ -51,6 +53,12 @@
                         <a href="{{ url_for('checklist') }}">{{ label }}</a>
                     {% elif view == 'arqueo' %}
                         <a href="{{ url_for('arqueo') }}">{{ label }}</a>
+                    {% elif view == 'mermas' %}
+                        <a href="{{ url_for('mermas') }}">{{ label }}</a>
+                    {% elif view == 'incidencias' %}
+                        <a href="{{ url_for('incidencias') }}">{{ label }}</a>
+                    {% elif view == 'horarios' %}
+                        <a href="{{ url_for('horarios') }}">📅 {{ label }}</a>
                     {% elif view == 'ajustes' %}
                         <a href="{{ url_for('ajustes') }}">{{ label }}</a>
                     {% endif %}
@@ -192,7 +200,7 @@
                 return;
             }
             window.addEventListener('load', function () {
-                navigator.serviceWorker.register('{{ url_for('service_worker') }}?v=20260419-2').then(function (registration) {
+                navigator.serviceWorker.register('{{ url_for('service_worker') }}?v=20260819-3').then(function (registration) {
                     registration.update();
                     if (registration.waiting) {
                         registration.waiting.postMessage({ type: 'SKIP_WAITING' });
@@ -215,6 +223,45 @@
                     // Registro silencioso: si falla, la app sigue funcionando como web normal.
                 });
             });
+        })();
+    </script>
+    <script>
+        (function () {
+            if (window.CURRENT_ROLE !== 'admin_sala' || !('Notification' in window)) {
+                return;
+            }
+
+            var permissionKey = 'p29-notification-permission-requested';
+            if (!sessionStorage.getItem(permissionKey) && Notification.permission === 'default') {
+                Notification.requestPermission().finally(function () {
+                    sessionStorage.setItem(permissionKey, '1');
+                });
+            }
+
+            var reminder = window.CIERRE_REMINDER;
+            if (!reminder || !('serviceWorker' in navigator)) {
+                return;
+            }
+
+            function checkReminder() {
+                if (Notification.permission !== 'granted') return;
+                var now = new Date();
+                var currentTime = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
+                var todayKey = 'p29-reminder-' + now.toISOString().slice(0, 10) + '-' + reminder.sede + '-' + reminder.turno;
+                if (currentTime === reminder.time && !localStorage.getItem(todayKey)) {
+                    navigator.serviceWorker.ready.then(function (registration) {
+                        registration.showNotification('Recordatorio de Cierre de Caja', {
+                            body: 'Es hora de iniciar el registro y cierre de caja de tu turno.',
+                            icon: '{{ url_for('static', filename='img/icono.png') }}',
+                            tag: todayKey,
+                            data: { url: '{{ url_for('arqueo') }}' }
+                        });
+                        localStorage.setItem(todayKey, '1');
+                    });
+                }
+            }
+            checkReminder();
+            window.setInterval(checkReminder, 30000);
         })();
     </script>
 </body>
