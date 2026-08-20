@@ -2856,14 +2856,30 @@ def create_app():
 			try:
 				fecha = datetime.strptime(request.form.get('fecha', ''), '%Y-%m-%d').date()
 				cantidad = _safe_float(request.form.get('cantidad'), 0)
-				producto = db.session.get(Producto, request.form.get('id_producto', '').strip())
-				if not producto or cantidad <= 0:
-					raise ValueError('Producto y cantidad valida son obligatorios.')
-				inventario = InventarioSede.query.filter_by(id_sede=target_sede, id_producto=producto.id_producto).with_for_update().first()
-				stock = _safe_float(inventario.stock_actual if inventario else 0, 0)
-				if not inventario or cantidad > stock:
-					raise ValueError(f'Stock insuficiente. Disponible: {stock:.2f}')
-				costo = _safe_float(producto.costo_unitario, 0)
+				producto_id = request.form.get('id_producto', '').strip()
+				es_producto_nuevo = producto_id == '__nuevo__'
+				if cantidad <= 0:
+					raise ValueError('La cantidad debe ser mayor que cero.')
+				if es_producto_nuevo:
+					nombre_producto = request.form.get('nombre_producto_nuevo', '').strip()
+					unidad_nueva = request.form.get('unidad', '').strip() or 'unidad'
+					costo = _safe_float(request.form.get('costo_unitario'), 0)
+					if not nombre_producto:
+						raise ValueError('Escribe el nombre del producto nuevo.')
+					producto = Producto(id_producto=_generate_product_id(), nombre_producto=nombre_producto, id_area='', area=_normalize_area(request.form.get('area', '')) or 'cocina', subarea='', unidad=unidad_nueva, costo_unitario=costo, estado='Activo')
+					db.session.add(producto)
+					db.session.flush()
+					inventario = None
+					stock = 0.0
+				else:
+					producto = db.session.get(Producto, producto_id)
+					if not producto:
+						raise ValueError('Producto invalido.')
+					inventario = InventarioSede.query.filter_by(id_sede=target_sede, id_producto=producto.id_producto).with_for_update().first()
+					stock = _safe_float(inventario.stock_actual if inventario else 0, 0)
+					if not inventario or cantidad > stock:
+						raise ValueError(f'Stock insuficiente. Disponible: {stock:.2f}')
+					costo = _safe_float(producto.costo_unitario, 0)
 				merma = Merma(
 					fecha=fecha, mes=fecha.strftime('%Y-%m'), turno=request.form.get('turno', target_turno),
 					area=request.form.get('area', '').strip(), id_producto=producto.id_producto,
@@ -2875,9 +2891,11 @@ def create_app():
 				)
 				if not merma.area or not merma.tipo_merma or not merma.responsable:
 					raise ValueError('Area, tipo de merma y responsable son obligatorios.')
-				inventario.stock_actual = stock - cantidad
+				if inventario:
+					inventario.stock_actual = stock - cantidad
 				db.session.add(merma)
-				db.session.add(MovimientoInventario(id_sede=target_sede, id_producto=producto.id_producto, cantidad=cantidad, tipo='SALIDA', motivo='Merma', id_usuario=current_user.id_usuario))
+				if inventario:
+					db.session.add(MovimientoInventario(id_sede=target_sede, id_producto=producto.id_producto, cantidad=cantidad, tipo='SALIDA', motivo='Merma', id_usuario=current_user.id_usuario))
 				db.session.commit()
 				flash('Merma registrada y stock actualizado.', 'ok')
 			except (ValueError, IntegrityError) as error:
@@ -2935,7 +2953,10 @@ def create_app():
 					raise ValueError('Completa los campos obligatorios y el monto del descuento.')
 				if is_admin_general and request.form.get('sede', '').isdigit():
 					target_sede = int(request.form['sede'])
-				db.session.add(Incidencia(fecha=fecha, mes=fecha.strftime('%Y-%m'), incidencia=request.form['incidencia'].strip(), descripcion=request.form.get('descripcion', '').strip(), responsable=request.form['responsable'].strip(), encargado=request.form['encargado'].strip(), descuento=descuento, monto=monto if descuento else 0, proceso=request.form.get('proceso', 'evaluacion'), id_sede=target_sede, id_usuario=current_user.id_usuario, bloqueada=True))
+				proceso = 'evaluacion' if not is_admin_general else request.form.get('proceso', 'evaluacion').strip().lower()
+				if proceso not in {'evaluacion', 'visto', 'aprobado', 'desaprobada'}:
+					proceso = 'evaluacion'
+				db.session.add(Incidencia(fecha=fecha, mes=fecha.strftime('%Y-%m'), incidencia=request.form['incidencia'].strip(), descripcion=request.form.get('descripcion', '').strip(), responsable=request.form['responsable'].strip(), encargado=request.form['encargado'].strip(), descuento=descuento, monto=monto if descuento else 0, proceso=proceso, id_sede=target_sede, id_usuario=current_user.id_usuario, bloqueada=True))
 				db.session.commit()
 				flash('Incidencia registrada.', 'ok')
 			except (ValueError, IntegrityError) as error:
