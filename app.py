@@ -1041,11 +1041,11 @@ def _ensure_inventory_schema(app):
 		('efectivo_dejado_caja_recomendado', 'FLOAT DEFAULT 0'),
 		('efectivo_dejado_caja_real', 'FLOAT DEFAULT 0'),
 		('diferencia_efectivo_dejado', 'FLOAT DEFAULT 0'),
-		('seccion_1_guardada', 'BOOLEAN DEFAULT 0'),
-		('efectivo_entregado_guardado', 'BOOLEAN DEFAULT 0'),
-		('efectivo_dejado_guardado', 'BOOLEAN DEFAULT 0'),
+		('seccion_1_guardada', 'BOOLEAN DEFAULT FALSE'),
+		('efectivo_entregado_guardado', 'BOOLEAN DEFAULT FALSE'),
+		('efectivo_dejado_guardado', 'BOOLEAN DEFAULT FALSE'),
 		('campos_bloqueados_json', "TEXT DEFAULT '[]'"),
-		('venta_sistema_guardada', 'BOOLEAN DEFAULT 0'),
+		('venta_sistema_guardada', 'BOOLEAN DEFAULT FALSE'),
 	):
 		if column_name not in arqueo_columns:
 			with db.engine.begin() as connection:
