@@ -114,6 +114,17 @@
     .agenda-integrated.agenda-restricted .filter-group:has(#filterSede),
     .agenda-integrated.agenda-restricted .filter-group:has(#filterArea),
     .agenda-integrated.agenda-restricted .filter-group:has(#filterTurno) { display: none; }
+    .agenda-integrated.agenda-restricted #section-trabajadores .data-table td:nth-child(3),
+    .agenda-integrated.agenda-restricted #section-trabajadores .data-table td:nth-child(4),
+    .agenda-integrated.agenda-restricted #section-trabajadores .data-table td:nth-child(7),
+    .agenda-integrated.agenda-restricted #section-trabajadores .data-table td:nth-child(8),
+    .agenda-integrated.agenda-restricted #section-trabajadores .data-table td:nth-child(9),
+    .agenda-integrated.agenda-restricted #section-trabajadores .data-table th:nth-child(3),
+    .agenda-integrated.agenda-restricted #section-trabajadores .data-table th:nth-child(4),
+    .agenda-integrated.agenda-restricted #section-trabajadores .data-table th:nth-child(7),
+    .agenda-integrated.agenda-restricted #section-trabajadores .data-table th:nth-child(8),
+    .agenda-integrated.agenda-restricted #section-trabajadores .data-table th:nth-child(9) { display: none; }
+    .agenda-scope-title { margin: 4px 0 0; color: #2563eb; font-weight: 700; }
     .agenda-integrated .agenda-side-nav { position: fixed; top: 96px; right: 0; left: auto; width: 230px; height: auto; max-height: calc(100vh - 116px); padding: 14px 10px; background: #fff !important; color: #334155 !important; border: 1px solid #e2e8f0 !important; border-right: 0 !important; border-radius: 14px 0 0 14px; box-shadow: 0 12px 30px rgba(15, 23, 42, 0.15); transform: translateX(100%); transition: transform 0.25s ease; overflow-y: auto; z-index: 900; }
     .agenda-integrated .agenda-side-nav.is-open { transform: translateX(0); }
     .agenda-integrated .agenda-side-nav .sidebar-header { height: auto; padding: 8px 10px 14px; border-bottom: 1px solid #e2e8f0; }
@@ -1376,6 +1387,8 @@
                             Trabajadores
                         </h2>
 
+                        <p id="agendaScopeTitle" class="agenda-scope-title"></p>
+
                         <p>
                             Gestiona la información y asignación del personal
                         </p>
@@ -1390,10 +1403,10 @@
                         <i class="fa-solid fa-user-plus"></i>
                         Agregar trabajador
                     </button>
-                    <button class="btn btn-secondary" type="button" id="btnWorkerTemplate" title="Descargar molde Excel"><i class="fa-solid fa-table-list"></i> Molde</button>
-                    <button class="btn btn-secondary" type="button" id="btnImportWorkers" title="Importar trabajadores desde Excel"><i class="fa-solid fa-file-arrow-up"></i> Importar</button>
+                    <button class="btn btn-secondary admin-general-only" type="button" id="btnWorkerTemplate" title="Descargar molde Excel"><i class="fa-solid fa-table-list"></i> Molde</button>
+                    <button class="btn btn-secondary admin-general-only" type="button" id="btnImportWorkers" title="Importar trabajadores desde Excel"><i class="fa-solid fa-file-arrow-up"></i> Importar</button>
                     <input type="file" id="workerImportFile" accept=".xlsx,.xls" hidden>
-                    <button class="btn btn-secondary" type="button" id="btnExportWorkers" title="Exportar trabajadores para Excel"><i class="fa-solid fa-file-excel"></i> Exportar Excel</button>
+                    <button class="btn btn-secondary admin-general-only" type="button" id="btnExportWorkers" title="Exportar trabajadores para Excel"><i class="fa-solid fa-file-excel"></i> Exportar Excel</button>
 
                 </div>
 
@@ -2346,7 +2359,7 @@
 
                 <!-- INFORMACIÓN PROFESIONAL -->
 
-                <div class="form-section">
+                <div class="form-section worker-restricted-hidden">
 
                     <h3>
                         <i class="fa-solid fa-briefcase"></i>
@@ -2507,7 +2520,7 @@
 
                 <!-- ASIGNACIÓN ACTUAL -->
 
-                <div class="form-section">
+                <div class="form-section worker-restricted-hidden">
 
                     <h3>
                         <i class="fa-solid fa-calendar-check"></i>

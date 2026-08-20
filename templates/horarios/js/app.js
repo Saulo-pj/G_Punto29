@@ -46,9 +46,26 @@ async function inicializarAplicacion() {
     renderizarTodo();
 
     aplicarAlcanceAgenda();
-
+    aplicarPerfilAgenda();
 }
 
+function agendaEsAdminGeneral() {
+    return (window.AGENDA_SCOPE || {}).role === "admin_general";
+}
+
+function aplicarPerfilAgenda() {
+    const scope = window.AGENDA_SCOPE || {};
+    const sede = obtenerSede(scope.sedeId);
+    const turno = obtenerTurno(scope.turnoId);
+    const titulo = document.querySelector("#agendaScopeTitle");
+    if (titulo) titulo.textContent = agendaEsAdminGeneral() ? "Vista global de todas las sedes y turnos" : `Sede: ${sede?.nombre || "-"} | Turno: ${turno?.nombre || "-"}`;
+    if (!agendaEsAdminGeneral()) {
+        document.querySelectorAll("#workerFilterSede, #agendaSedeFilter, #attendanceSedeFilter").forEach(select => { select.value = String(scope.sedeId || ""); select.disabled = true; });
+        document.querySelectorAll("#workerLocation, #workerShift").forEach(select => { select.disabled = true; });
+        document.querySelector(".agenda-integrated")?.classList.add("agenda-restricted");
+    }
+    document.querySelectorAll(".admin-general-only, .worker-restricted-hidden").forEach(elemento => elemento.classList.toggle("is-hidden", !agendaEsAdminGeneral()));
+}
 
 /* =========================================================
    RENDER GENERAL
@@ -443,11 +460,11 @@ function inicializarBotones() {
     document.querySelectorAll("#section-reportes .report-card button").forEach((button, index) => {
         button.addEventListener("click", () => {
             if (index === 2) {
-                const filas = obtenerColeccion("trabajadores").map(worker => [worker.nombre, worker.apellido, worker.dni, obtenerSede(worker.sedeId)?.nombre || "", obtenerTurno(worker.turnoId)?.nombre || ""]);
+                const filas = obtenerTrabajadores().map(worker => [worker.nombre, worker.apellido, worker.dni, obtenerSede(worker.sedeId)?.nombre || "", obtenerTurno(worker.turnoId)?.nombre || ""]);
                 exportarCSV("personal", ["Nombre", "Apellido", "DNI", "Sede", "Turno"], filas);
                 return;
             }
-            const filas = obtenerColeccion("trabajadores").map(worker => [worker.nombre, worker.apellido, obtenerSede(worker.sedeId)?.nombre || "", obtenerTurno(worker.turnoId)?.nombre || ""]);
+            const filas = obtenerTrabajadores().map(worker => [worker.nombre, worker.apellido, obtenerSede(worker.sedeId)?.nombre || "", obtenerTurno(worker.turnoId)?.nombre || ""]);
             exportarCSV(index === 0 ? "horario-mensual" : "horario-semanal", ["Nombre", "Apellido", "Sede", "Turno"], filas);
         });
     });
@@ -1853,6 +1870,11 @@ function cargarOpcionesTrabajador() {
     }
     const otros = document.querySelector("#workerOtherPositions");
     if (otros) otros.innerHTML = obtenerColeccion("cargos").filter(item => item.estado === "activo").map(item => `<label><input type="checkbox" value="${item.id}"> <span>${item.nombre}</span></label>`).join("");
+    const scope = window.AGENDA_SCOPE || {};
+    if (!agendaEsAdminGeneral()) {
+        if (sede) sede.value = String(scope.sedeId || "");
+        if (turno) turno.value = String(scope.turnoId || "");
+    }
 }
 
 function abrirEditarTrabajador(id) {
@@ -1890,7 +1912,21 @@ function guardarTrabajadorFormulario(event) {
         profesion: document.querySelector("#workerProfession")?.value.trim(), institucionEstudios: document.querySelector("#workerInstitution")?.value.trim(), areaId, cargos: cargoIds, otrosCargos, sedeId: Number(document.querySelector("#workerLocation")?.value), turnoId: Number(document.querySelector("#workerShift")?.value),
         diaDescanso: ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"].indexOf(document.querySelector("#workerRestDay")?.value), estado: document.querySelector("#workerStatus")?.value || "activo"
     };
-    if (!datos.nombre || !datos.apellido || !datos.dni || !datos.sedeId || !datos.turnoId || !datos.cargos.length) return;
+    if (!agendaEsAdminGeneral()) {
+        const scope = window.AGENDA_SCOPE || {};
+        datos.sedeId = Number(scope.sedeId);
+        datos.turnoId = Number(scope.turnoId);
+        datos.diaDescanso = 0;
+        datos.cargos = [];
+        datos.otrosCargos = [];
+        datos.areaId = 0;
+        datos.direccion = "";
+        datos.emergenciaNumero = "";
+        datos.gradoProfesional = "";
+        datos.profesion = "";
+        datos.institucionEstudios = "";
+    }
+    if (!datos.nombre || !datos.apellido || !datos.dni || !datos.sedeId || !datos.turnoId || (agendaEsAdminGeneral() && !datos.cargos.length)) return;
     if (trabajadorEditandoId) editarTrabajador(trabajadorEditandoId, datos); else agregarTrabajador(datos);
     trabajadorEditandoId = null;
     event.target.reset();
@@ -1962,16 +1998,24 @@ function guardarCatalogo(nombre, existente, id, cambios) {
     actualizarColeccion(nombre, lista);
 }
 
+function eliminarCatalogo(nombre, id) {
+    if (!agendaEsAdminGeneral() || !confirm("¿Eliminar este registro?")) return;
+    actualizarColeccion(nombre, obtenerColeccion(nombre).filter(item => Number(item.id) !== Number(id)));
+    renderizarTodo();
+}
+
 function renderizarCatalogoCargosAreas() {
     const tabla = document.querySelector("#section-cargos tbody");
     if (!tabla) return;
-    tabla.innerHTML = obtenerColeccion("cargos").map(cargo => `<tr><td><strong>${cargo.nombre}</strong></td><td>${obtenerColeccion("areas").find(area => Number(area.id) === Number(cargo.areaId))?.nombre || "-"}</td><td>${obtenerTrabajadores().filter(trabajador => trabajador.cargos.includes(Number(cargo.id))).length}</td><td><span class="status-badge ${cargo.estado === "activo" ? "active" : "inactive"}">${cargo.estado === "activo" ? "Activo" : "Inactivo"}</span></td><td><button class="table-action" type="button" data-edit-cargo="${cargo.id}"><i class="fa-solid fa-pen"></i></button></td></tr>`).join("");
+    tabla.innerHTML = obtenerColeccion("cargos").map(cargo => `<tr><td><strong>${cargo.nombre}</strong></td><td>${obtenerColeccion("areas").find(area => Number(area.id) === Number(cargo.areaId))?.nombre || "-"}</td><td>${obtenerTrabajadores().filter(trabajador => trabajador.cargos.includes(Number(cargo.id))).length}</td><td><span class="status-badge ${cargo.estado === "activo" ? "active" : "inactive"}">${cargo.estado === "activo" ? "Activo" : "Inactivo"}</span></td><td>${agendaEsAdminGeneral() ? `<button class="table-action" type="button" data-edit-cargo="${cargo.id}"><i class="fa-solid fa-pen"></i></button><button class="table-action danger" type="button" data-delete-cargo="${cargo.id}"><i class="fa-solid fa-trash"></i></button>` : ""}</td></tr>`).join("");
     tabla.querySelectorAll("[data-edit-cargo]").forEach(button => button.addEventListener("click", () => abrirFormularioGestion("cargo", button.dataset.editCargo)));
+    tabla.querySelectorAll("[data-delete-cargo]").forEach(button => button.addEventListener("click", () => eliminarCatalogo("cargos", button.dataset.deleteCargo)));
     let areasPanel = document.querySelector("#areasManagementPanel");
     if (!areasPanel) { areasPanel = document.createElement("div"); areasPanel.id = "areasManagementPanel"; areasPanel.className = "table-card catalog-areas-panel"; document.querySelector("#section-cargos")?.appendChild(areasPanel); }
-    areasPanel.innerHTML = `<div class="card-header"><div><h3>Áreas operativas</h3><span>Crear, editar y activar áreas</span></div><button class="btn btn-secondary btn-small" type="button" id="btnAddArea">Agregar área</button></div><div class="catalog-area-list">${obtenerColeccion("areas").map(area => `<div><span>${area.nombre}</span><span class="status-badge ${area.estado === "activo" ? "active" : "inactive"}">${area.estado}</span><button class="table-action" type="button" data-edit-area="${area.id}"><i class="fa-solid fa-pen"></i></button></div>`).join("")}</div>`;
-    areasPanel.querySelector("#btnAddArea").addEventListener("click", () => abrirFormularioGestion("area"));
+    areasPanel.innerHTML = `<div class="card-header"><div><h3>Áreas operativas</h3><span>${agendaEsAdminGeneral() ? "Crear, editar y eliminar áreas" : "Consulta de áreas configuradas"}</span></div>${agendaEsAdminGeneral() ? `<button class="btn btn-secondary btn-small" type="button" id="btnAddArea">Agregar área</button>` : ""}</div><div class="catalog-area-list">${obtenerColeccion("areas").map(area => `<div><span>${area.nombre}</span><span class="status-badge ${area.estado === "activo" ? "active" : "inactive"}</span>${agendaEsAdminGeneral() ? `<button class="table-action" type="button" data-edit-area="${area.id}"><i class="fa-solid fa-pen"></i></button><button class="table-action danger" type="button" data-delete-area="${area.id}"><i class="fa-solid fa-trash"></i></button>` : ""}</div>`).join("")}</div>`;
+    areasPanel.querySelector("#btnAddArea")?.addEventListener("click", () => abrirFormularioGestion("area"));
     areasPanel.querySelectorAll("[data-edit-area]").forEach(button => button.addEventListener("click", () => abrirFormularioGestion("area", button.dataset.editArea)));
+    areasPanel.querySelectorAll("[data-delete-area]").forEach(button => button.addEventListener("click", () => eliminarCatalogo("areas", button.dataset.deleteArea)));
 }
 
 function obtenerEtiquetaEstadoAgenda(estado) {

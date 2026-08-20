@@ -2712,6 +2712,8 @@ def create_app():
 	def horarios_importar_trabajadores():
 		if not current_user.can_write('horarios', 'update'):
 			return jsonify({'error': 'forbidden'}), 403
+		if current_user.rol_nombre != 'admin_general':
+			return jsonify({'error': 'Solo Administración General puede importar trabajadores.'}), 403
 		archivo = request.files.get('archivo')
 		if not archivo:
 			return jsonify({'error': 'missing_file'}), 400
