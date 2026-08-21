@@ -116,12 +116,10 @@
     .agenda-integrated.agenda-restricted .filter-group:has(#filterTurno) { display: none; }
     .agenda-integrated.agenda-restricted #section-trabajadores .data-table td:nth-child(3),
     .agenda-integrated.agenda-restricted #section-trabajadores .data-table td:nth-child(4),
-    .agenda-integrated.agenda-restricted #section-trabajadores .data-table td:nth-child(7),
     .agenda-integrated.agenda-restricted #section-trabajadores .data-table td:nth-child(8),
     .agenda-integrated.agenda-restricted #section-trabajadores .data-table td:nth-child(9),
     .agenda-integrated.agenda-restricted #section-trabajadores .data-table th:nth-child(3),
     .agenda-integrated.agenda-restricted #section-trabajadores .data-table th:nth-child(4),
-    .agenda-integrated.agenda-restricted #section-trabajadores .data-table th:nth-child(7),
     .agenda-integrated.agenda-restricted #section-trabajadores .data-table th:nth-child(8),
     .agenda-integrated.agenda-restricted #section-trabajadores .data-table th:nth-child(9) { display: none; }
     .agenda-scope-title { margin: 4px 0 0; color: #2563eb; font-weight: 700; }
@@ -140,8 +138,8 @@
     .agenda-integrated .agenda-nav-toggle .arrow-open { display: none; }
     .agenda-integrated .agenda-nav-toggle.is-open .arrow-closed { display: none; }
     .agenda-integrated .agenda-nav-toggle.is-open .arrow-open { display: inline; }
-    .agenda-integrated #section-sedes,
-    .agenda-integrated #section-turnos { display: none !important; }
+    .agenda-integrated.agenda-restricted #section-sedes,
+    .agenda-integrated.agenda-restricted #section-turnos { display: none !important; }
     @media (max-width: 900px) {
         .sidebar.is-open { transform: translateX(0) !important; }
         .content { margin-left: 0 !important; padding: 56px 8px 8px !important; }
@@ -695,7 +693,7 @@
                         </div>
 
 
-                        <div class="location-list">
+                        <div class="location-list" id="dashboardLocations">
 
 
                             <div class="location-item">
@@ -801,7 +799,7 @@
                         </div>
 
 
-                        <div class="activity-list">
+                        <div class="activity-list" id="dashboardActivity">
 
 
                             <div class="activity-item">
@@ -915,7 +913,7 @@
                     </div>
 
 
-                    <div class="quick-calendar">
+                    <div class="quick-calendar" id="dashboardQuickDays">
 
                         <div class="quick-day">
 
@@ -2520,7 +2518,7 @@
 
                 <!-- ASIGNACIÓN ACTUAL -->
 
-                <div class="form-section worker-restricted-hidden">
+                <div class="form-section">
 
                     <h3>
                         <i class="fa-solid fa-calendar-check"></i>

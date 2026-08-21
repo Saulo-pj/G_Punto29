@@ -16,10 +16,6 @@ async function cargarCatalogosHorarios() {
         const turnoGlobal = catalogosHorarios.turnos.find(turno => String(turno.id_global) === String(scope.turnoId));
         if (turnoGlobal) scope.turnoId = turnoGlobal.id;
     }
-    const datos = obtenerDatos();
-    datos.sedes = catalogosHorarios.sedes;
-    datos.turnos = catalogosHorarios.turnos;
-    guardarDatos(datos);
     return catalogosHorarios;
 }
 
@@ -29,13 +25,8 @@ async function sincronizarAgendaConServidor() {
     const remoto = await respuesta.json();
     if (remoto.exists && remoto.datos) {
         const datosRemotos = normalizarDatos(remoto.datos);
-        if (datosRemotos.configuracion.horariosWorkersCleanedV1 !== true) {
-            datosRemotos.trabajadores = [];
-            datosRemotos.configuracion.horariosWorkersCleanedV1 = true;
-            const limpieza = await fetch("/api/horarios/datos", { method: "PUT", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify(datosRemotos) });
-            if (!limpieza.ok) throw new Error("No se pudieron limpiar los trabajadores locales.");
-            localStorage.setItem(REMOTE_WORKERS_CLEANUP_KEY, "1");
-        }
+        datosRemotos.sedes = catalogosHorarios.sedes;
+        datosRemotos.turnos = catalogosHorarios.turnos;
         localStorage.setItem(STORAGE_KEY, JSON.stringify(datosRemotos));
         agendaPersistenciaLista = true;
         return;
@@ -113,7 +104,10 @@ function obtenerDatos() {
 
         inicializarStorage();
 
-        return normalizarDatos(structuredClone(DATOS_INICIALES));
+        return normalizarDatos({
+            configuracion: {}, sedes: [], turnos: [], areas: [], cargos: [],
+            trabajadores: [], permisos: [], excepciones: [], asistencias: [], historial: []
+        });
 
     }
 

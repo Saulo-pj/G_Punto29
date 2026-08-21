@@ -59,9 +59,11 @@ function aplicarPerfilAgenda() {
     const turno = obtenerTurno(scope.turnoId);
     const titulo = document.querySelector("#agendaScopeTitle");
     if (titulo) titulo.textContent = agendaEsAdminGeneral() ? "Vista global de todas las sedes y turnos" : `Sede: ${sede?.nombre || "-"} | Turno: ${turno?.nombre || "-"}`;
+    if (turno) agendaTurnoSeleccionado = turno.nombre.toLowerCase().includes("noche") ? "night" : "day";
     if (!agendaEsAdminGeneral()) {
         document.querySelectorAll("#workerFilterSede, #agendaSedeFilter, #attendanceSedeFilter").forEach(select => { select.value = String(scope.sedeId || ""); select.disabled = true; });
-        document.querySelectorAll("#workerLocation, #workerShift").forEach(select => { select.disabled = true; });
+        document.querySelectorAll("#workerLocation").forEach(select => { select.disabled = true; });
+        document.querySelector("#workerLocation")?.parentElement?.classList.add("is-hidden");
         document.querySelector(".agenda-integrated")?.classList.add("agenda-restricted");
     }
     document.querySelectorAll(".admin-general-only, .worker-restricted-hidden").forEach(elemento => elemento.classList.toggle("is-hidden", !agendaEsAdminGeneral()));
@@ -642,9 +644,9 @@ function renderizarTrabajadores() {
 
     const trabajadores = filtrarTrabajadores({
         texto: document.querySelector("#workerSearch")?.value || "",
-        sedeId: valorFiltro("#workerFilterSede"),
+        sedeId: agendaEsAdminGeneral() ? valorFiltro("#workerFilterSede") : (window.AGENDA_SCOPE || {}).sedeId,
         estado: valorFiltro("#workerFilterStatus"),
-        turnoId: "",
+        turnoId: agendaEsAdminGeneral() ? "" : (window.AGENDA_SCOPE || {}).turnoId,
         areaId: ""
     });
 
@@ -1201,6 +1203,35 @@ function renderizarDashboard() {
         const elemento = document.querySelector(selector);
         if (elemento) elemento.textContent = valor;
     });
+
+    const locations = document.querySelector("#dashboardLocations");
+    if (locations) {
+        const sedes = obtenerSedes().filter(sede => sede.estado === "activo");
+        const total = Math.max(trabajadores.length, 1);
+        locations.innerHTML = sedes.map(sede => {
+            const cantidad = trabajadores.filter(item => Number(item.sedeId) === Number(sede.id)).length;
+            const porcentaje = Math.round(cantidad / total * 100);
+            return `<div class="location-item"><div class="location-information"><div class="location-icon"><i class="fa-solid fa-building"></i></div><div><strong>${sede.nombre}</strong><span>${cantidad} trabajadores</span></div></div><strong>${porcentaje}%</strong></div><div class="progress-bar"><div class="progress blue-progress" style="width:${porcentaje}%"></div></div>`;
+        }).join("");
+    }
+
+    const activity = document.querySelector("#dashboardActivity");
+    if (activity) {
+        const historial = obtenerColeccion("historial").filter(item => item.fecha || item.timestamp || item.fechaHora).sort((a, b) => String(b.timestamp || b.fechaHora || b.fecha).localeCompare(String(a.timestamp || a.fechaHora || a.fecha))).slice(0, 3);
+        activity.innerHTML = historial.length ? historial.map(item => `<div class="activity-item"><div class="activity-icon blue"><i class="fa-solid fa-clock-rotate-left"></i></div><div><strong>${String(item.tipo || "Cambio").replaceAll("_", " ")}</strong><span>${item.detalle || item.motivo || "Actualización de agenda"}</span><small>${item.fecha || ""}</small></div></div>`).join("") : '<p class="muted">Sin actividades registradas.</p>';
+    }
+
+    const quickDays = document.querySelector("#dashboardQuickDays");
+    if (quickDays) {
+        quickDays.innerHTML = Array.from({ length: 5 }, (_, index) => {
+            const fecha = new Date();
+            fecha.setHours(0, 0, 0, 0);
+            fecha.setDate(fecha.getDate() + index);
+            const fechaISO = formatearFechaISO(fecha);
+            const resumenDia = contarTrabajadoresDelDia(fechaISO);
+            return `<div class="quick-day ${index === 0 ? "active" : ""}"><span>${NOMBRES_DIAS[fecha.getDay()].slice(0, 3).toUpperCase()}</span><strong>${fecha.getDate()}</strong><small>${resumenDia.total} trabajadores</small></div>`;
+        }).join("");
+    }
 
     renderizarAlertasPlanificacion(hoy);
 
@@ -1873,7 +1904,10 @@ function cargarOpcionesTrabajador() {
     const scope = window.AGENDA_SCOPE || {};
     if (!agendaEsAdminGeneral()) {
         if (sede) sede.value = String(scope.sedeId || "");
-        if (turno) turno.value = String(scope.turnoId || "");
+        if (turno) {
+            turno.innerHTML = obtenerTurnos().filter(item => Number(item.id) === Number(scope.turnoId)).map(item => `<option value="${item.id}">${item.nombre}</option>`).join("");
+            turno.value = String(scope.turnoId || "");
+        }
     }
 }
 
@@ -1916,7 +1950,6 @@ function guardarTrabajadorFormulario(event) {
         const scope = window.AGENDA_SCOPE || {};
         datos.sedeId = Number(scope.sedeId);
         datos.turnoId = Number(scope.turnoId);
-        datos.diaDescanso = 0;
         datos.cargos = [];
         datos.otrosCargos = [];
         datos.areaId = 0;
