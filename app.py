@@ -634,7 +634,8 @@ def _process_arqueo_save(cierre, payload, is_admin_general, current_user, target
 				if item_id in by_id:
 					existing = by_id[item_id]
 					if existing.get('bloqueado'):
-						if existing.get('tipo') == 'Propina' or tipo == 'Propina':
+						# Sólo la propina puede aumentar y únicamente antes del cierre definitivo.
+						if (existing.get('tipo') == 'Propina' or tipo == 'Propina') and not cierre.efectivo_dejado_guardado:
 							prev_monto = _safe_float(existing.get('monto'), 0.0)
 							if monto >= prev_monto:
 								existing['monto'] = monto

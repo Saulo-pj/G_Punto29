@@ -21,7 +21,7 @@
 <div id="arqueo-capture">
 
 {% if is_admin_general %}
-<form method="GET" class="inline-form">
+<form method="GET" class="inline-form" data-native-submit="true">
 	<div>
 		<label>Sede</label>
 		<select name="sede" required>
@@ -68,6 +68,7 @@
 			{% for g in gastos_actuales %}
 			{% set g_id = g.id|default('gasto-' ~ loop.index) %}
 			{% set is_propina = (g.tipo == 'Propina') %}
+			{% set propina_increment_allowed = is_propina and not (cierre and cierre.efectivo_dejado_guardado) %}
 			{% set is_locked = (g.bloqueado and not is_admin_general) %}
 			<div class="gasto-item {% if is_locked and not is_propina %}is-locked{% endif %}" data-gasto-id="{{ g_id }}" data-locked="{{ 'true' if is_locked else 'false' }}" data-is-propina="{{ 'true' if is_propina else 'false' }}">
 				<select name="gasto_tipo[]" required {% if is_locked %}disabled{% endif %}>
@@ -76,10 +77,10 @@
 					{% endfor %}
 				</select>
 				<input type="text" name="gasto_nombre[]" value="{{ g.nombre }}" placeholder="Nombre del gasto" {% if is_locked %}disabled{% endif %}>
-				<input type="number" step="0.01" name="gasto_monto[]" value="{{ g.monto }}" placeholder="Monto" data-prev-monto="{{ g.monto }}" {% if is_locked and not is_propina %}disabled{% endif %} {% if is_locked and is_propina %}min="{{ g.monto }}" title="La propina solo puede aumentarse (mínimo {{ g.monto }})"{% endif %}>
+				<input type="number" step="0.01" name="gasto_monto[]" value="{{ g.monto }}" placeholder="Monto" data-prev-monto="{{ g.monto }}" {% if is_locked and (not is_propina or not propina_increment_allowed) %}disabled{% endif %} {% if is_locked and is_propina and propina_increment_allowed %}min="{{ g.monto }}" title="La propina solo puede aumentarse hasta el cierre definitivo (mínimo {{ g.monto }})"{% endif %}>
 				{% if is_admin_general or not is_locked %}
 				<button type="button" class="btn-danger remove-gasto">Eliminar</button>
-				{% elif is_propina %}
+				{% elif is_propina and propina_increment_allowed %}
 				<span class="badge-locked" title="Solo aumento permitido"><i class="fa-solid fa-arrow-trend-up"></i> Propina (solo aumento)</span>
 				{% else %}
 				<span class="badge-locked"><i class="fa-solid fa-lock"></i> Bloqueado</span>
@@ -408,9 +409,9 @@
 				});
 				return;
 			}
-			var rows = list.querySelectorAll('.gasto-item');
 			gastosList.forEach(function (g, idx) {
-				var row = rows[idx];
+				// Los gastos pueden omitirse, eliminarse u ordenarse: nunca asociarlos por posición.
+				var row = list.querySelector('.gasto-item[data-gasto-id="' + g.id + '"]');
 				if (!row) return;
 				row.dataset.gastoId = g.id || ('gasto-' + idx);
 				var isPropina = (g.tipo === 'Propina');
@@ -426,12 +427,12 @@
 					if (typeSel) typeSel.disabled = true;
 					if (nameInp) nameInp.disabled = true;
 
-					if (isPropina) {
+					if (isPropina && !efectivoDejadoGuardado) {
 						if (montoInp) {
 							montoInp.disabled = false;
 							montoInp.min = String(g.monto || 0);
 							montoInp.dataset.prevMonto = String(g.monto || 0);
-							montoInp.title = 'La propina solo puede aumentarse (mínimo ' + (g.monto || 0) + ')';
+							montoInp.title = 'La propina solo puede aumentarse hasta el cierre definitivo (mínimo ' + (g.monto || 0) + ')';
 						}
 						if (removeBtn) {
 							var badge = document.createElement('span');
@@ -574,6 +575,7 @@
 		// Evitar envíos POST tradicionales en formularios de arqueo y capturar Enter
 		document.querySelectorAll('form').forEach(function (form) {
 			if (form.getAttribute('action') && form.getAttribute('action').includes('export')) return;
+			if (form.dataset.nativeSubmit === 'true') return;
 			if (form.classList.contains('date-box-form')) return;
 			form.addEventListener('submit', function (e) {
 				e.preventDefault();
