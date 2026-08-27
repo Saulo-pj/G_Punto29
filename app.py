@@ -726,7 +726,7 @@ def _process_arqueo_save(cierre, payload, is_admin_general, current_user, target
 	db.session.commit()
 
 	gastos_final = json.loads(cierre.gastos_json or '[]')
-	logs = ArqueoCajaHistorial.query.filter_by(id_arqueo=cierre.id_arqueo).order_by(ArqueoCajaHistorial.fecha_hora.desc()).limit(50).all()
+	logs = _historial_arqueo_por_alcance(cierre)
 	logs_payload = [
 		{
 			'id': log.id_historial,
@@ -786,6 +786,19 @@ def _audit_arqueo_event_with_user(arqueo, tipo_evento, campo, valor_anterior, va
 			valor_nuevo=json.dumps(valor_nuevo, ensure_ascii=True, default=str),
 		)
 	)
+
+
+def _historial_arqueo_por_alcance(cierre, limite=50):
+	"""Reúne la auditoría del mismo cierre operativo, incluso con IDs históricos duplicados."""
+	if not cierre:
+		return []
+	return ArqueoCajaHistorial.query.join(
+		ArqueoCaja, ArqueoCaja.id_arqueo == ArqueoCajaHistorial.id_arqueo
+	).filter(
+		ArqueoCaja.fecha == cierre.fecha,
+		ArqueoCaja.id_sede == cierre.id_sede,
+		ArqueoCaja.id_turno == cierre.id_turno,
+	).order_by(ArqueoCajaHistorial.fecha_hora.desc()).limit(limite).all()
 
 
 def _calc_cierre_operativo(monto_inicial, pos_tarjetas, yape, plin, efectivo, venta_sistema, gastos):
@@ -3510,7 +3523,7 @@ def create_app():
 		historial_cierres = historial_query.order_by(ArqueoCaja.id_arqueo.desc()).limit(20).all()
 		historial_auditoria = []
 		if cierre:
-			historial_auditoria = ArqueoCajaHistorial.query.filter_by(id_arqueo=cierre.id_arqueo).order_by(ArqueoCajaHistorial.fecha_hora.desc()).limit(50).all()
+			historial_auditoria = _historial_arqueo_por_alcance(cierre)
 
 		sedes_disponibles = []
 		turnos_disponibles = []
