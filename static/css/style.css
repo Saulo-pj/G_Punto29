@@ -195,6 +195,15 @@ body {
 	cursor: pointer;
 }
 
+/* Conserva el selector nativo funcional, pero muestra sólo la fecha. */
+.date-box-form input[type="date"]::-webkit-calendar-picker-indicator {
+	opacity: 0;
+	position: absolute;
+	width: 100%;
+	height: 100%;
+	cursor: pointer;
+}
+
 .module-heading {
 	display: flex;
 	justify-content: space-between;
