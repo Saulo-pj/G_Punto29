@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'p29-v4';
+const CACHE_VERSION = 'p29-v5';
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const PAGE_CACHE = `${CACHE_VERSION}-pages`;
 

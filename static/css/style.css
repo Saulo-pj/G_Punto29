@@ -189,11 +189,13 @@ body {
 .date-box-form input[type="date"] {
 	position: absolute;
 	opacity: 0;
-	pointer-events: none;
-	width: 1px;
-	height: 1px;
+	pointer-events: auto;
+	width: 100%;
+	height: 100%;
 	left: 0;
 	top: 0;
+	z-index: 4;
+	cursor: pointer;
 }
 
 .module-heading {
