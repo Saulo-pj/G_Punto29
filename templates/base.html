@@ -203,11 +203,28 @@
                 return;
             }
             window.addEventListener('load', function () {
-                // Los datos de operación nunca deben quedar bajo control offline:
-                // se retira el worker anterior para evitar arqueos e historiales viejos.
-                navigator.serviceWorker.getRegistrations().then(function (registrations) {
-                    registrations.forEach(function (registration) { registration.unregister(); });
-                }).catch(function () {});
+                navigator.serviceWorker.register('{{ url_for('service_worker') }}?v=20260827-2').then(function (registration) {
+                    registration.update();
+                    if (registration.waiting) {
+                        registration.waiting.postMessage({ type: 'SKIP_WAITING' });
+                    }
+                    registration.addEventListener('updatefound', function () {
+                        var worker = registration.installing;
+                        if (!worker) {
+                            return;
+                        }
+                        worker.addEventListener('statechange', function () {
+                            if (worker.state === 'installed' && navigator.serviceWorker.controller) {
+                                worker.postMessage({ type: 'SKIP_WAITING' });
+                            }
+                        });
+                    });
+                    navigator.serviceWorker.addEventListener('controllerchange', function () {
+                        window.location.reload();
+                    });
+                }).catch(function () {
+                    // Registro silencioso: si falla, la app sigue funcionando como web normal.
+                });
             });
         })();
     </script>

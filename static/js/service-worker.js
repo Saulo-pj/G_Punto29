@@ -1,5 +1,6 @@
-const CACHE_VERSION = 'p29-v6';
+const CACHE_VERSION = 'p29-v5';
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
+const PAGE_CACHE = `${CACHE_VERSION}-pages`;
 
 const CORE_ASSETS = [
   '/',
@@ -60,6 +61,21 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  const isNavigation = request.mode === 'navigate';
+
+  if (isNavigation) {
+    event.respondWith(
+      fetch(request)
+        .then((networkResponse) => {
+          const clone = networkResponse.clone();
+          caches.open(PAGE_CACHE).then((cache) => cache.put(request, clone));
+          return networkResponse;
+        })
+        .catch(() => caches.match(request).then((cached) => cached || caches.match('/')))
+    );
+    return;
+  }
+
   const isStaticAsset =
     url.pathname.endsWith('.js') ||
     url.pathname.endsWith('.css') ||
@@ -77,7 +93,18 @@ self.addEventListener('fetch', (event) => {
     );
     return;
   }
-  // Las vistas y APIs muestran información operativa (arqueos, historial,
-  // inventario). Nunca deben responder con una copia vieja del navegador.
-  event.respondWith(fetch(request));
+
+  event.respondWith(
+    caches.match(request).then((cached) => {
+      if (cached) {
+        return cached;
+      }
+
+      return fetch(request).then((networkResponse) => {
+        const copy = networkResponse.clone();
+        caches.open(STATIC_CACHE).then((cache) => cache.put(request, copy));
+        return networkResponse;
+      });
+    })
+  );
 });
