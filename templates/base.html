@@ -12,6 +12,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400..900&family=Poppins:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,100;1,200;1,300;1,400;1,500;1,600;1,700;1,800;1,900&family=Zen+Dots&display=swap" rel="stylesheet">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='img/icono.png') }}">
     <link rel="apple-touch-icon" href="{{ url_for('static', filename='img/icono.png') }}">
     <link rel="manifest" href="{{ url_for('manifest') }}">
@@ -20,6 +21,42 @@
         window.INVENTORY_AREA_OPTIONS = {{ areas_subareas|tojson if areas_subareas is defined else '{}' }};
         window.CIERRE_REMINDER = {{ cierre_reminder|default(none)|tojson }};
         window.CURRENT_ROLE = {{ current_user.rol_nombre|default('')|tojson }};
+        window.CSRF_TOKEN = {{ csrf_token()|tojson }};
+        (function() {
+            var token = window.CSRF_TOKEN;
+            if (token) {
+                var origFetch = window.fetch;
+                window.fetch = function(url, init) {
+                    init = init || {};
+                    var method = (init.method || 'GET').toUpperCase();
+                    if (['POST', 'PUT', 'PATCH', 'DELETE'].indexOf(method) !== -1) {
+                        if (!init.headers) {
+                            init.headers = {};
+                        }
+                        if (init.headers instanceof Headers) {
+                            if (!init.headers.has('X-CSRFToken')) init.headers.set('X-CSRFToken', token);
+                        } else if (Array.isArray(init.headers)) {
+                            init.headers.push(['X-CSRFToken', token]);
+                        } else {
+                            init.headers['X-CSRFToken'] = token;
+                        }
+                    }
+                    return origFetch.call(this, url, init);
+                };
+                document.addEventListener('submit', function(e) {
+                    var form = e.target;
+                    if (form && form.method && form.method.toUpperCase() === 'POST') {
+                        if (!form.querySelector('input[name="csrf_token"]')) {
+                            var input = document.createElement('input');
+                            input.type = 'hidden';
+                            input.name = 'csrf_token';
+                            input.value = token;
+                            form.appendChild(input);
+                        }
+                    }
+                }, true);
+            }
+        })();
     </script>
     <script defer src="{{ url_for('static', filename='js/inventario.js') }}"></script>
 </head>

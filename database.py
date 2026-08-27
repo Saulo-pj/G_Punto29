@@ -252,6 +252,10 @@ class ArqueoCaja(db.Model):
 	gastos_json = db.Column(db.Text, default='[]')
 	observaciones = db.Column(db.Text)
 
+	__table_args__ = (
+		UniqueConstraint('id_sede', 'id_turno', 'fecha', name='uq_arqueo_caja_sede_turno_fecha'),
+	)
+
 
 class ArqueoCajaHistorial(db.Model):
 	__tablename__ = 'arqueo_caja_historial'

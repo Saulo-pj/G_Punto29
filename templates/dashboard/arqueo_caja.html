@@ -45,19 +45,18 @@
 </form>
 {% endif %}
 
-{% set section1_locked = false %}
 {% set delivered_locked = cierre and cierre.efectivo_entregado_guardado and not is_admin_general %}
 {% set left_locked = cierre and cierre.efectivo_dejado_guardado and not is_admin_general %}
 {% set locked_fields_json = locked_fields|default([])|tojson %}
 {% if can_insert or can_update %}
-<form method="POST" class="card cierre-caja-form">
+<form method="POST" class="card cierre-caja-form" onsubmit="return false;">
 	<input type="hidden" name="section" value="section1">
 	<h3>Resumen operativo por sede y turno</h3>
 	<p class="muted">Todos los admin sala de la misma sede y turno comparten este mismo cierre.</p>
-	<fieldset {% if section1_locked %}disabled{% endif %}>
+	<fieldset>
 	<div>
 		<label>Monto Base Colocado (entrada manual)</label>
-		<input type="number" step="0.01" name="monto_inicial" value="{{ cierre.monto_inicial if cierre else 0 }}" required {% if section1_locked %}disabled{% endif %}>
+		<input type="number" step="0.01" name="monto_inicial" value="{% if cierre and ('monto_inicial' in locked_fields or is_admin_general) and cierre.monto_inicial is not none %}{{ '%.2f'|format(cierre.monto_inicial) }}{% endif %}" placeholder="0.00">
 		{% if expected_base is defined %}
 			<div class="muted">Monto inicial base esperado (config): {{ '%.2f'|format(expected_base) }}</div>
 		{% endif %}
@@ -67,19 +66,28 @@
 	<div id="gastos-list" class="gastos-list">
 		{% if gastos_actuales %}
 			{% for g in gastos_actuales %}
-			<div class="gasto-item">
-				<select name="gasto_tipo[]" required>
+			{% set g_id = g.id|default('gasto-' ~ loop.index) %}
+			{% set is_propina = (g.tipo == 'Propina') %}
+			{% set is_locked = (g.bloqueado and not is_admin_general) %}
+			<div class="gasto-item {% if is_locked and not is_propina %}is-locked{% endif %}" data-gasto-id="{{ g_id }}" data-locked="{{ 'true' if is_locked else 'false' }}" data-is-propina="{{ 'true' if is_propina else 'false' }}">
+				<select name="gasto_tipo[]" required {% if is_locked %}disabled{% endif %}>
 					{% for tipo in ['Productos de cocina faltantes', 'Productos de sala faltantes', 'Comida', 'Propina', 'Marketing', 'Almacén', 'Otros'] %}
 					<option value="{{ tipo }}" {% if g.tipo|default('Otros') == tipo %}selected{% endif %}>{{ tipo }}</option>
 					{% endfor %}
 				</select>
-				<input type="text" name="gasto_nombre[]" value="{{ g.nombre }}" placeholder="Nombre del gasto">
-				<input type="number" step="0.01" name="gasto_monto[]" value="{{ g.monto }}" placeholder="Monto">
+				<input type="text" name="gasto_nombre[]" value="{{ g.nombre }}" placeholder="Nombre del gasto" {% if is_locked %}disabled{% endif %}>
+				<input type="number" step="0.01" name="gasto_monto[]" value="{{ g.monto }}" placeholder="Monto" data-prev-monto="{{ g.monto }}" {% if is_locked and not is_propina %}disabled{% endif %} {% if is_locked and is_propina %}min="{{ g.monto }}" title="La propina solo puede aumentarse (mínimo {{ g.monto }})"{% endif %}>
+				{% if is_admin_general or not is_locked %}
 				<button type="button" class="btn-danger remove-gasto">Eliminar</button>
+				{% elif is_propina %}
+				<span class="badge-locked" title="Solo aumento permitido"><i class="fa-solid fa-arrow-trend-up"></i> Propina (solo aumento)</span>
+				{% else %}
+				<span class="badge-locked"><i class="fa-solid fa-lock"></i> Bloqueado</span>
+				{% endif %}
 			</div>
 			{% endfor %}
 		{% else %}
-			<div class="gasto-item">
+			<div class="gasto-item" data-gasto-id="gasto-1" data-locked="false">
 				<select name="gasto_tipo[]" required>
 					<option value="Otros">Otros</option>
 					<option value="Productos de cocina faltantes">Productos de cocina faltantes</option>
@@ -95,7 +103,7 @@
 			</div>
 		{% endif %}
 	</div>
-	<button type="button" id="add-gasto-btn" class="btn-outline" {% if section1_locked %}disabled{% endif %}>Agregar gasto</button>
+	<button type="button" id="add-gasto-btn" class="btn-outline">Agregar gasto</button>
 
 	<h3>Ingresos por canales</h3>
 	<div class="grid-2">
@@ -103,33 +111,33 @@
 			<label class="canal-label" for="pos_tarjetas">POS (Tarjetas)</label>
 			<div class="canal-control">
 				<img class="canal-icon" src="{{ url_for('static', filename='img/visa.png') }}" alt="Tarjetas">
-				<input id="pos_tarjetas" type="number" step="0.01" name="pos_tarjetas" value="{{ cierre.pos_tarjetas if cierre else 0 }}">
+				<input id="pos_tarjetas" type="number" step="0.01" name="pos_tarjetas" value="{% if cierre and ('pos_tarjetas' in locked_fields or is_admin_general) and cierre.pos_tarjetas is not none %}{{ '%.2f'|format(cierre.pos_tarjetas) }}{% endif %}" placeholder="0.00">
 			</div>
 		</div>
 		<div class="ingreso-canal-item">
 			<label class="canal-label" for="yape">Yape</label>
 			<div class="canal-control">
 				<img class="canal-icon" src="{{ url_for('static', filename='img/logo-yape.png') }}" alt="Yape">
-				<input id="yape" type="number" step="0.01" name="yape" value="{{ cierre.yape if cierre else 0 }}">
+				<input id="yape" type="number" step="0.01" name="yape" value="{% if cierre and ('yape' in locked_fields or is_admin_general) and cierre.yape is not none %}{{ '%.2f'|format(cierre.yape) }}{% endif %}" placeholder="0.00">
 			</div>
 		</div>
 		<div class="ingreso-canal-item">
 			<label class="canal-label" for="plin">Plin</label>
 			<div class="canal-control">
 				<img class="canal-icon" src="{{ url_for('static', filename='img/logo-plin.png') }}" alt="Plin">
-				<input id="plin" type="number" step="0.01" name="plin" value="{{ cierre.plin if cierre else 0 }}">
+				<input id="plin" type="number" step="0.01" name="plin" value="{% if cierre and ('plin' in locked_fields or is_admin_general) and cierre.plin is not none %}{{ '%.2f'|format(cierre.plin) }}{% endif %}" placeholder="0.00">
 			</div>
 		</div>
 		<div class="ingreso-canal-item">
 			<label class="canal-label" for="efectivo">Efectivo</label>
 			<div class="canal-control">
 				<img class="canal-icon" src="{{ url_for('static', filename='img/dinero-en-efectivo.png') }}" alt="Efectivo">
-				<input id="efectivo" type="number" step="0.01" name="efectivo" value="{{ cierre.efectivo if cierre else 0 }}">
+				<input id="efectivo" type="number" step="0.01" name="efectivo" value="{% if cierre and ('efectivo' in locked_fields or is_admin_general) and cierre.efectivo is not none %}{{ '%.2f'|format(cierre.efectivo) }}{% endif %}" placeholder="0.00">
 			</div>
 		</div>
 	</div>
 	<label>Venta del sistema (POS)</label>
-	<input type="number" step="0.01" name="venta_sistema" value="{{ cierre.venta_sistema if cierre else 0 }}" required>
+	<input id="venta_sistema" type="number" step="0.01" name="venta_sistema" value="{% if cierre and ('venta_sistema' in locked_fields or cierre.venta_sistema_guardada or is_admin_general) and cierre.venta_sistema is not none %}{{ '%.2f'|format(cierre.venta_sistema) }}{% endif %}" placeholder="0.00">
 	</fieldset>
 
 	<button type="button" class="section-save-hint" disabled>Se guarda con el botón Guardar</button>
@@ -138,34 +146,21 @@
 
 <section class="card">
 	<h3>Observaciones</h3>
-	<form method="POST" class="inline-form">
+	<form method="POST" class="inline-form" onsubmit="return false;">
 		<input type="hidden" name="section" value="observaciones">
 		<textarea name="observaciones" rows="3">{{ cierre.observaciones if cierre else '' }}</textarea>
 		<button type="button" class="section-save-hint" disabled>Se guarda con el botón Guardar</button>
 	</form>
 </section>
 
-{% if section1_locked and not is_admin_general %}
-<section class="card">
-	<h4>Ajuste incremental de Propina</h4>
-	<p class="muted">El Administrador de Sala solo puede aumentar la propina ya guardada.</p>
-	<form method="POST" class="inline-form">
-		<input type="hidden" name="section" value="propina">
-		<label>Nuevo monto de propina</label>
-		<input type="number" step="0.01" name="propina_monto" min="0" value="0" required>
-		<button type="button" class="section-save-hint" disabled>Se guarda con el botón Guardar</button>
-	</form>
-</section>
-{% endif %}
-
 <section class="card cierre-section {% if not (cierre and cierre.venta_sistema_guardada) %}is-locked{% endif %}">
 	<h3>2. Auditoría de efectivo</h3>
-	<form method="POST" class="cierre-caja-form">
+	<form method="POST" class="cierre-caja-form" onsubmit="return false;">
 		<input type="hidden" name="section" value="efectivo_entregado">
 		<fieldset {% if not is_admin_general and (not audit_enabled or delivered_locked) %}disabled{% endif %}>
 			<div class="grid-2 audit-fields">
 				<div class="recommendation-box"><label>Recomendación - Efectivo a entregar</label><strong id="recomendado-efectivo">{{ '%.2f'|format((efectivo|default(0)) - (expected_base|default(0))) }}</strong><small>Efectivo - Monto Inicial Base Esperado</small></div>
-				<div class="field-with-icon"><label for="efectivo_entregado">Efectivo entregado</label><div class="canal-control"><img class="canal-icon" src="{{ url_for('static', filename='img/efectivo_entregado.png') }}" alt="Efectivo entregado"><input id="efectivo_entregado" type="number" step="0.01" name="efectivo_entregado" value="{{ cierre.efectivo_entregado if cierre else 0 }}" required></div></div>
+				<div class="field-with-icon"><label for="efectivo_entregado">Efectivo entregado</label><div class="canal-control"><img class="canal-icon" src="{{ url_for('static', filename='img/efectivo_entregado.png') }}" alt="Efectivo entregado"><input id="efectivo_entregado" type="number" step="0.01" name="efectivo_entregado" value="{% if cierre and ('efectivo_entregado' in locked_fields or cierre.efectivo_entregado_guardado or is_admin_general) and cierre.efectivo_entregado is not none %}{{ '%.2f'|format(cierre.efectivo_entregado) }}{% endif %}" placeholder="0.00"></div></div>
 			</div>
 		</fieldset>
 		<button type="button" class="section-save-hint" disabled>Se guarda con el botón Guardar</button>
@@ -174,12 +169,12 @@
 
 <section class="card cierre-section {% if not (cierre and cierre.efectivo_entregado_guardado) %}is-locked{% endif %}">
 	<h3>3. Efectivo dejado en caja</h3>
-	<form method="POST" class="cierre-caja-form">
+	<form method="POST" class="cierre-caja-form" onsubmit="return false;">
 		<input type="hidden" name="section" value="efectivo_dejado">
 		<fieldset {% if not is_admin_general and (not (cierre and cierre.efectivo_entregado_guardado) or left_locked) %}disabled{% endif %}>
 			<div class="grid-2 left-cash-fields">
 				<div class="recommendation-box"><label>Efectivo dejado en caja (Recomendado)</label><strong id="efectivo-dejado-recomendado">{{ '%.2f'|format(cierre.efectivo_dejado_caja_recomendado if cierre else ((efectivo|default(0)) - (cierre.efectivo_entregado if cierre else 0))) }}</strong></div>
-				<div class="field-with-icon"><label for="efectivo_dejado_caja_real">Efectivo dejado en caja (Real)</label><div class="canal-control"><img class="canal-icon" src="{{ url_for('static', filename='img/efectivo_dejado_caja.png') }}" alt="Efectivo dejado en caja"><input id="efectivo_dejado_caja_real" type="number" step="0.01" name="efectivo_dejado_caja_real" value="{{ cierre.efectivo_dejado_caja_real if cierre else 0 }}" required></div></div>
+				<div class="field-with-icon"><label for="efectivo_dejado_caja_real">Efectivo dejado en caja (Real)</label><div class="canal-control"><img class="canal-icon" src="{{ url_for('static', filename='img/efectivo_dejado_caja.png') }}" alt="Efectivo dejado en caja"><input id="efectivo_dejado_caja_real" type="number" step="0.01" name="efectivo_dejado_caja_real" value="{% if cierre and ('efectivo_dejado_caja_real' in locked_fields or cierre.efectivo_dejado_guardado or is_admin_general) and cierre.efectivo_dejado_caja_real is not none %}{{ '%.2f'|format(cierre.efectivo_dejado_caja_real) }}{% endif %}" placeholder="0.00"></div></div>
 			</div>
 			<div id="diferencia-efectivo-dejado" class="status-pill">Diferencia: {{ '%.2f'|format(cierre.diferencia_efectivo_dejado if cierre else 0) }}</div>
 		</fieldset>
@@ -405,15 +400,75 @@
 			}
 		}
 
+		function updateGastosState(gastosList) {
+			if (!Array.isArray(gastosList) || !gastosList.length) return;
+			if (isAdminGeneral) {
+				list.querySelectorAll('.gasto-item').forEach(function (row, idx) {
+					if (gastosList[idx]) row.dataset.gastoId = gastosList[idx].id || ('gasto-' + idx);
+				});
+				return;
+			}
+			var rows = list.querySelectorAll('.gasto-item');
+			gastosList.forEach(function (g, idx) {
+				var row = rows[idx];
+				if (!row) return;
+				row.dataset.gastoId = g.id || ('gasto-' + idx);
+				var isPropina = (g.tipo === 'Propina');
+				row.dataset.isPropina = isPropina ? 'true' : 'false';
+
+				if (g.bloqueado) {
+					row.dataset.locked = 'true';
+					var typeSel = row.querySelector('[name="gasto_tipo[]"]');
+					var nameInp = row.querySelector('[name="gasto_nombre[]"]');
+					var montoInp = row.querySelector('[name="gasto_monto[]"]');
+					var removeBtn = row.querySelector('.remove-gasto');
+
+					if (typeSel) typeSel.disabled = true;
+					if (nameInp) nameInp.disabled = true;
+
+					if (isPropina) {
+						if (montoInp) {
+							montoInp.disabled = false;
+							montoInp.min = String(g.monto || 0);
+							montoInp.dataset.prevMonto = String(g.monto || 0);
+							montoInp.title = 'La propina solo puede aumentarse (mínimo ' + (g.monto || 0) + ')';
+						}
+						if (removeBtn) {
+							var badge = document.createElement('span');
+							badge.className = 'badge-locked';
+							badge.title = 'Solo aumento permitido';
+							badge.innerHTML = '<i class="fa-solid fa-arrow-trend-up"></i> Propina (solo aumento)';
+							removeBtn.replaceWith(badge);
+						}
+					} else {
+						row.classList.add('is-locked');
+						if (montoInp) montoInp.disabled = true;
+						if (removeBtn) {
+							var badge = document.createElement('span');
+							badge.className = 'badge-locked';
+							badge.innerHTML = '<i class="fa-solid fa-lock"></i> Bloqueado';
+							removeBtn.replaceWith(badge);
+						}
+					}
+				}
+			});
+		}
+
 		function lockSavedGastos() {
-			if (isAdminGeneral || ventaSistemaGuardada) return;
+			if (isAdminGeneral) return;
 			list.querySelectorAll('.gasto-item').forEach(function (row) {
+				var isPropina = row.dataset.isPropina === 'true';
+				var isLocked = row.dataset.locked === 'true';
 				var amount = row.querySelector('[name="gasto_monto[]"]');
-				if (amount && toNum(amount.value) > 0) {
-					row.classList.add('is-locked');
-					row.querySelectorAll('input, select, button.remove-gasto').forEach(function (element) {
-						element.disabled = true;
-					});
+				if (isLocked) {
+					var typeSel = row.querySelector('[name="gasto_tipo[]"]');
+					var nameInp = row.querySelector('[name="gasto_nombre[]"]');
+					if (typeSel) typeSel.disabled = true;
+					if (nameInp) nameInp.disabled = true;
+					if (!isPropina && amount) {
+						row.classList.add('is-locked');
+						amount.disabled = true;
+					}
 				}
 			});
 		}
@@ -426,12 +481,23 @@
 						var type = row.querySelector('[name="gasto_tipo[]"]');
 						var detail = row.querySelector('[name="gasto_nombre[]"]');
 						var amount = row.querySelector('[name="gasto_monto[]"]');
-						return { id: row.dataset.gastoId || ('gasto-' + index), tipo: type ? type.value : 'Otros', nombre: detail ? detail.value : '', monto: amount ? amount.value : '' };
+						return {
+							id: row.dataset.gastoId || ('gasto-' + index),
+							tipo: type ? type.value : 'Otros',
+							nombre: detail ? detail.value : '',
+							monto: amount ? amount.value : '',
+							bloqueado: row.dataset.locked === 'true'
+						};
 					});
 					return;
 				}
 				var element = document.querySelector('[name="' + name + '"]');
-				if (element && !element.disabled) fields[name] = element.value;
+				if (element && !element.disabled) {
+					var val = element.value.trim();
+					if (val !== '') {
+						fields[name] = val;
+					}
+				}
 			});
 			return fields;
 		}
@@ -442,6 +508,24 @@
 				setStatus('No hay cambios pendientes.');
 				return Promise.resolve();
 			}
+
+			// Validar incremento de propina para admin sala
+			if (!isAdminGeneral && fields.gastos) {
+				for (var i = 0; i < fields.gastos.length; i++) {
+					var g = fields.gastos[i];
+					if (g.tipo === 'Propina' && g.bloqueado) {
+						var row = list.querySelector('[data-gasto-id="' + g.id + '"]');
+						var montoInput = row ? row.querySelector('[name="gasto_monto[]"]') : null;
+						var prevMonto = montoInput && montoInput.dataset.prevMonto ? parseFloat(montoInput.dataset.prevMonto) : 0;
+						var curMonto = parseFloat(g.monto || 0);
+						if (curMonto < prevMonto) {
+							alert('La propina no puede ser menor al monto previamente guardado (S/ ' + prevMonto.toFixed(2) + ').');
+							return Promise.resolve();
+						}
+					}
+				}
+			}
+
 			if (saveBtn) saveBtn.disabled = true;
 			setStatus(eventName === 'AUTOGUARDADO_5MIN' ? 'Autoguardando...' : 'Guardando...');
 			return fetch('{{ url_for("arqueo", sede=target_sede_id, turno=target_turno_id) }}', {
@@ -457,8 +541,9 @@
 				efectivoEntregadoGuardado = Boolean(data.efectivo_entregado_guardado);
 				efectivoDejadoGuardado = Boolean(data.efectivo_dejado_guardado);
 				lockSavedFields(data.locked_fields);
-				lockSavedGastos();
+				updateGastosState(data.gastos);
 				renderHistorial(data.logs);
+				updateSummary();
 				dirtyFields.clear();
 				setStatus(data.message || 'Guardado correctamente.');
 				if (Object.prototype.hasOwnProperty.call(fields, 'efectivo_dejado_caja_real') || data.closure_complete) showSuccessToast();
@@ -478,13 +563,30 @@
 		document.querySelectorAll('input, select, textarea').forEach(function (element) {
 			if (element.name && element.name !== 'section' && element.name !== 'gasto_tipo[]' && element.name !== 'gasto_nombre[]' && element.name !== 'gasto_monto[]') {
 				element.addEventListener('input', function () { markDirty(element.name); });
-					if (element.name === 'efectivo_entregado') element.addEventListener('focus', function () { markDirty(element.name); });
+				if (element.name === 'efectivo_entregado') element.addEventListener('focus', function () { markDirty(element.name); });
 			}
 			if (element.name && element.closest('#gastos-list')) {
 				element.addEventListener('input', function () { markDirty('gastos'); });
 				element.addEventListener('change', function () { markDirty('gastos'); });
 			}
 		});
+
+		// Evitar envíos POST tradicionales en formularios de arqueo y capturar Enter
+		document.querySelectorAll('form').forEach(function (form) {
+			if (form.getAttribute('action') && form.getAttribute('action').includes('export')) return;
+			if (form.classList.contains('date-box-form')) return;
+			form.addEventListener('submit', function (e) {
+				e.preventDefault();
+				saveChanged('GUARDADO_MANUAL');
+			});
+			form.addEventListener('keydown', function (e) {
+				if (e.key === 'Enter' && e.target.tagName !== 'TEXTAREA') {
+					e.preventDefault();
+					saveChanged('GUARDADO_MANUAL');
+				}
+			});
+		});
+
 		if (saveBtn) saveBtn.addEventListener('click', function () { saveChanged('GUARDADO_MANUAL'); });
 		lockSavedFields(Array.from(lockedFields));
 
@@ -666,8 +768,11 @@
 		}
 
 		addBtn.addEventListener('click', function () {
+			var newId = 'gasto-' + Date.now();
 			var row = document.createElement('div');
 			row.className = 'gasto-item';
+			row.dataset.gastoId = newId;
+			row.dataset.locked = 'false';
 			row.innerHTML = '' +
 				'<select name="gasto_tipo[]" required>' +
 				'<option value="Otros">Otros</option><option value="Productos de cocina faltantes">Productos de cocina faltantes</option>' +

@@ -8,11 +8,6 @@ function setFormScroll(form) {
 	}
 	input.value = String(Math.max(window.scrollY || 0, 0));
 }
-	}
-	if (!Number.isNaN(y)) {
-		window.scrollTo({ top: Math.max(y, 0), behavior: 'auto' });
-	}
-}
 
 async function submitAsync(form, formData) {
 	const targetUrl = form.getAttribute('action') || window.location.href;

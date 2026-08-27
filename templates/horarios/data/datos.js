@@ -424,6 +424,7 @@ const DATOS_INICIALES = {
             tipo: "Permiso",
             motivo: "Cita personal"
         }
+        */
 
     ]
 

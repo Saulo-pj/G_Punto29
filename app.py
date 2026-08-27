@@ -2,6 +2,9 @@ import os
 import importlib
 import json
 import re
+import secrets
+import uuid
+import hmac
 from io import BytesIO
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -510,19 +513,219 @@ def _parse_gastos_from_form(form_data):
 			continue
 		if monto < 0:
 			monto = 0.0
-		gastos.append({'nombre': nombre_limpio or tipo, 'tipo': tipo, 'monto': monto})
+		gastos.append({
+			'id': f'gasto-{index + 1}',
+			'nombre': nombre_limpio or tipo,
+			'tipo': tipo,
+			'monto': monto,
+			'bloqueado': True,
+		})
 	return gastos
 
 
+def _extract_fields_from_form(form_data):
+	fields = {}
+	for k in ('monto_inicial', 'pos_tarjetas', 'yape', 'plin', 'efectivo', 'venta_sistema', 'observaciones', 'efectivo_entregado', 'efectivo_dejado_caja_real'):
+		if k in form_data and form_data.get(k, '').strip() != '':
+			fields[k] = form_data.get(k).strip()
+	gastos = _parse_gastos_from_form(form_data)
+	if gastos:
+		fields['gastos'] = gastos
+	return fields
+
+
+def _process_arqueo_save(cierre, payload, is_admin_general, current_user, target_sede_id):
+	fields = payload.get('fields') or {}
+	is_autosave = payload.get('event') == 'AUTOGUARDADO_5MIN'
+	actor_id = getattr(current_user, 'id_usuario', None) or getattr(current_user, 'get_id', lambda: None)()
+
+	def _audit(campo, anterior, nuevo):
+		_audit_arqueo_event_with_user(cierre, 'AUTOGUARDADO_5MIN' if is_autosave else 'GUARDADO_MANUAL', campo, anterior, nuevo, actor_id)
+
+	try:
+		locked_fields = set(json.loads(cierre.campos_bloqueados_json or '[]'))
+	except (TypeError, ValueError):
+		locked_fields = set()
+
+	allowed_numeric = {'monto_inicial', 'pos_tarjetas', 'yape', 'plin', 'efectivo', 'venta_sistema'}
+	for field in allowed_numeric:
+		if field not in fields:
+			continue
+		raw_value = fields.get(field)
+		# Ignorar campos vacíos ('', None) para no bloquearlos ni alterarlos erróneamente
+		if raw_value in ('', None):
+			continue
+		if field in locked_fields and not is_admin_general:
+			continue
+		old_value = getattr(cierre, field)
+		new_value = _safe_float(raw_value, old_value or 0.0)
+		setattr(cierre, field, new_value)
+		locked_fields.add(field)
+		_audit(field, old_value, new_value)
+		if field == 'venta_sistema':
+			cierre.venta_sistema_guardada = True
+
+	if 'observaciones' in fields:
+		old_value = cierre.observaciones or ''
+		new_value = str(fields.get('observaciones') or '')
+		if old_value != new_value:
+			cierre.observaciones = new_value
+			_audit('observaciones', old_value, new_value)
+
+	audit_enabled = bool(
+		cierre.venta_sistema_guardada
+		and locked_fields.intersection({'pos_tarjetas', 'yape', 'plin', 'efectivo'})
+	)
+
+	if 'efectivo_entregado' in fields and (('efectivo_entregado' not in locked_fields) or is_admin_general):
+		raw_value = fields.get('efectivo_entregado')
+		if raw_value not in ('', None) and (audit_enabled or is_admin_general):
+			old_value = cierre.efectivo_entregado
+			cierre.efectivo_entregado = _safe_float(raw_value, old_value or 0.0)
+			cierre.efectivo_entregado_guardado = True
+			locked_fields.add('efectivo_entregado')
+			_audit('efectivo_entregado', old_value, cierre.efectivo_entregado)
+
+	if 'efectivo_dejado_caja_real' in fields and (('efectivo_dejado_caja_real' not in locked_fields) or is_admin_general):
+		raw_value = fields.get('efectivo_dejado_caja_real')
+		if raw_value not in ('', None) and (cierre.efectivo_entregado_guardado or is_admin_general):
+			recommended = (cierre.efectivo or 0.0) - (cierre.efectivo_entregado or 0.0)
+			old_value = cierre.efectivo_dejado_caja_real
+			cierre.efectivo_dejado_caja_recomendado = recommended
+			cierre.efectivo_dejado_caja_real = _safe_float(raw_value, old_value or 0.0)
+			cierre.diferencia_efectivo_dejado = cierre.efectivo_dejado_caja_real - recommended
+			cierre.efectivo_dejado_guardado = True
+			locked_fields.add('efectivo_dejado_caja_real')
+			_audit('efectivo_dejado_caja_real', old_value, cierre.efectivo_dejado_caja_real)
+
+	if 'gastos' in fields:
+		incoming = fields.get('gastos') or []
+		try:
+			current_gastos = json.loads(cierre.gastos_json or '[]')
+		except (TypeError, ValueError):
+			current_gastos = []
+
+		if is_admin_general:
+			new_gastos_list = []
+			for idx, item in enumerate(incoming):
+				monto = _safe_float(item.get('monto'), 0.0)
+				nombre = str(item.get('nombre') or '').strip()
+				tipo = str(item.get('tipo') or 'Otros').strip()
+				if monto > 0 or nombre:
+					item_id = str(item.get('id') or f'gasto-{idx + 1}')
+					new_gastos_list.append({
+						'id': item_id,
+						'tipo': tipo,
+						'nombre': nombre,
+						'monto': monto,
+						'bloqueado': True,
+					})
+			cierre.gastos_json = json.dumps(new_gastos_list, ensure_ascii=True)
+			_audit('gastos', current_gastos, new_gastos_list)
+		else:
+			by_id = {str(item.get('id')): dict(item) for item in current_gastos if item.get('id') is not None}
+			for idx, item in enumerate(incoming):
+				monto = _safe_float(item.get('monto'), 0.0)
+				nombre = str(item.get('nombre') or '').strip()
+				tipo = str(item.get('tipo') or 'Otros').strip()
+				if monto <= 0 and not nombre:
+					continue
+				item_id = str(item.get('id') or f'gasto-{uuid.uuid4().hex[:8]}')
+				if item_id in by_id:
+					existing = by_id[item_id]
+					if existing.get('bloqueado'):
+						if existing.get('tipo') == 'Propina' or tipo == 'Propina':
+							prev_monto = _safe_float(existing.get('monto'), 0.0)
+							if monto >= prev_monto:
+								existing['monto'] = monto
+								if nombre:
+									existing['nombre'] = nombre
+					else:
+						existing['tipo'] = tipo
+						existing['nombre'] = nombre
+						existing['monto'] = monto
+						existing['bloqueado'] = True
+				else:
+					by_id[item_id] = {
+						'id': item_id,
+						'tipo': tipo,
+						'nombre': nombre,
+						'monto': monto,
+						'bloqueado': True,
+					}
+			cierre.gastos_json = json.dumps(list(by_id.values()), ensure_ascii=True)
+			_audit('gastos', current_gastos, list(by_id.values()))
+
+	sede_obj = Sede.query.get(target_sede_id)
+	expected_base = _safe_float(sede_obj.monto_inicial_base_esperado if sede_obj else 0.0)
+	cierre.efectivo_a_entregar = (cierre.efectivo or 0.0) - expected_base
+	res_calc = _calc_cierre_operativo(
+		cierre.monto_inicial or 0.0,
+		cierre.pos_tarjetas or 0.0,
+		cierre.yape or 0.0,
+		cierre.plin or 0.0,
+		cierre.efectivo or 0.0,
+		cierre.venta_sistema or 0.0,
+		json.loads(cierre.gastos_json or '[]')
+	)
+	cierre.monto_final = res_calc['subtotal']
+	cierre.campos_bloqueados_json = json.dumps(sorted(locked_fields))
+	db.session.commit()
+
+	gastos_final = json.loads(cierre.gastos_json or '[]')
+	logs = ArqueoCajaHistorial.query.filter_by(id_arqueo=cierre.id_arqueo).order_by(ArqueoCajaHistorial.fecha_hora.desc()).limit(50).all()
+	logs_payload = [
+		{
+			'id': log.id_historial,
+			'fecha_hora': log.fecha_hora.strftime('%Y-%m-%d %H:%M:%S') if log.fecha_hora else '',
+			'usuario_id': log.usuario_id or '',
+			'tipo_evento': log.tipo_evento or 'GUARDADO_MANUAL',
+			'campo': log.campo_o_seccion_afectada or log.accion or '',
+			'valor_anterior': log.valor_anterior or '',
+			'valor_nuevo': log.valor_nuevo or '',
+		}
+		for log in logs
+	]
+	audit_enabled = bool(
+		cierre.venta_sistema_guardada
+		and locked_fields.intersection({'pos_tarjetas', 'yape', 'plin', 'efectivo'})
+	)
+	return {
+		'ok': True,
+		'locked_fields': sorted(locked_fields),
+		'gastos': gastos_final,
+		'venta_sistema_guardada': bool(cierre.venta_sistema_guardada),
+		'audit_enabled': audit_enabled,
+		'efectivo_entregado_guardado': bool(cierre.efectivo_entregado_guardado),
+		'efectivo_dejado_guardado': bool(cierre.efectivo_dejado_guardado),
+		'closure_complete': bool(cierre.efectivo_dejado_guardado),
+		'resumen': res_calc,
+		'logs': logs_payload,
+		'message': 'Guardado correctamente.',
+	}
+
+
 def _audit_arqueo(arqueo, accion, valor_anterior, valor_nuevo):
-	return _audit_arqueo_event(arqueo, 'GUARDADO_MANUAL', accion, valor_anterior, valor_nuevo)
+	try:
+		actor = current_user.id_usuario if current_user and not current_user.is_anonymous else None
+	except Exception:
+		actor = None
+	return _audit_arqueo_event_with_user(arqueo, 'GUARDADO_MANUAL', accion, valor_anterior, valor_nuevo, actor)
 
 
 def _audit_arqueo_event(arqueo, tipo_evento, campo, valor_anterior, valor_nuevo):
+	try:
+		actor = current_user.id_usuario if current_user and not current_user.is_anonymous else None
+	except Exception:
+		actor = None
+	_audit_arqueo_event_with_user(arqueo, tipo_evento, campo, valor_anterior, valor_nuevo, actor)
+
+
+def _audit_arqueo_event_with_user(arqueo, tipo_evento, campo, valor_anterior, valor_nuevo, actor_id):
 	db.session.add(
 		ArqueoCajaHistorial(
 			id_arqueo=arqueo.id_arqueo,
-			usuario_id=current_user.id_usuario,
+			usuario_id=actor_id,
 			accion=campo,
 			tipo_evento=tipo_evento,
 			campo_o_seccion_afectada=campo,
@@ -1112,6 +1315,40 @@ def _ensure_inventory_schema(app):
 			connection.execute(text("UPDATE productos SET subarea = 'sala' WHERE area = 'sala' AND (subarea IS NULL OR subarea = '')"))
 			connection.execute(text("UPDATE arqueo_caja SET gastos_json = '[]' WHERE gastos_json IS NULL OR gastos_json = ''"))
 
+	# Consolidar duplicados históricos en arqueo_caja y asegurar índice único
+	try:
+		with db.engine.begin() as connection:
+			dup_rows = connection.execute(text("""
+				SELECT id_sede, id_turno, fecha, COUNT(*) as cnt
+				FROM arqueo_caja
+				WHERE id_sede IS NOT NULL AND id_turno IS NOT NULL AND fecha IS NOT NULL
+				GROUP BY id_sede, id_turno, fecha
+				HAVING COUNT(*) > 1
+			""")).fetchall()
+
+			for dup in dup_rows:
+				s_id, t_id, f_val = dup[0], dup[1], dup[2]
+				records = connection.execute(
+					text("SELECT id_arqueo FROM arqueo_caja WHERE id_sede = :s AND id_turno = :t AND fecha = :f ORDER BY id_arqueo DESC"),
+					{'s': s_id, 't': t_id, 'f': f_val}
+				).fetchall()
+				if records and len(records) > 1:
+					primary_id = records[0][0]
+					dup_ids = [r[0] for r in records[1:]]
+					for d_id in dup_ids:
+						connection.execute(
+							text("UPDATE arqueo_caja_historial SET id_arqueo = :prim WHERE id_arqueo = :dup"),
+							{'prim': primary_id, 'dup': d_id}
+						)
+						connection.execute(
+							text("DELETE FROM arqueo_caja WHERE id_arqueo = :dup"),
+							{'dup': d_id}
+						)
+
+			connection.execute(text('CREATE UNIQUE INDEX IF NOT EXISTS uq_arqueo_caja_sede_turno_fecha ON arqueo_caja (id_sede, id_turno, fecha)'))
+	except Exception as err:
+		print(f'Aviso al asegurar índice uq_arqueo_caja_sede_turno_fecha: {err}')
+
 
 def create_app():
 	app = Flask(__name__)
@@ -1127,13 +1364,52 @@ def create_app():
 	# Evita que el navegador conserve plantillas y recursos durante el desarrollo.
 	app.config['TEMPLATES_AUTO_RELOAD'] = True
 	app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
-	app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'una_clave_muy_secreta')
+
+	secret_key = os.environ.get('SECRET_KEY')
+	is_production = bool(
+		os.environ.get('RAILWAY_ENVIRONMENT')
+		or os.environ.get('RENDER')
+		or os.environ.get('FLASK_ENV') == 'production'
+		or os.environ.get('PRODUCTION')
+	)
+	if not secret_key:
+		if is_production:
+			raise RuntimeError('SECRET_KEY environment variable is required in production!')
+		secret_key = 'dev_key_punto29_' + secrets.token_hex(16)
+	app.config['SECRET_KEY'] = secret_key
+
 	app.config['REMEMBER_COOKIE_DURATION'] = timedelta(days=90)
 	app.config['REMEMBER_COOKIE_REFRESH_EACH_REQUEST'] = True
 	app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=90)
 	app.config['SESSION_COOKIE_HTTPONLY'] = True
 	app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 	app.jinja_env.filters['peru_datetime'] = _format_peru_datetime
+
+	def _get_csrf_token():
+		if '_csrf_token' not in session:
+			session['_csrf_token'] = secrets.token_hex(32)
+		return session['_csrf_token']
+
+	app.jinja_env.globals['csrf_token'] = _get_csrf_token
+
+	@app.before_request
+	def csrf_protect():
+		if request.method in ('POST', 'PUT', 'PATCH', 'DELETE'):
+			token = (
+				request.headers.get('X-CSRFToken')
+				or request.headers.get('X-CSRF-Token')
+				or request.form.get('csrf_token')
+			)
+			if not token and request.is_json:
+				payload = request.get_json(silent=True) or {}
+				if isinstance(payload, dict):
+					token = payload.get('csrf_token')
+			expected = session.get('_csrf_token')
+			if not expected or not token or not hmac.compare_digest(str(token), str(expected)):
+				if request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+					return jsonify({'ok': False, 'error': 'csrf_error', 'message': 'Token CSRF inválido o expirado. Recarga la página.'}), 403
+				flash('Sesión o token de seguridad inválido. Por favor intenta de nuevo.', 'error')
+				return redirect(request.referrer or url_for('dashboard'))
 
 	@app.after_request
 	def disable_browser_cache(response):
@@ -3064,221 +3340,34 @@ def create_app():
 		if request.method == 'POST':
 			if not current_user.can_write('arqueo', 'update') and not current_user.can_write('arqueo', 'insert'):
 				return _forbidden_redirect()
-			section = request.form.get('section', 'section1')
-			if request.is_json or section == 'partial':
-				payload = request.get_json(silent=True) or {}
-				fields = payload.get('fields') or {}
-				is_autosave = payload.get('event') == 'AUTOGUARDADO_5MIN'
-				if cierre is None:
-					cierre = ArqueoCaja(id_sede=target_sede_id, id_turno=target_turno_id, id_usuario=current_user.id_usuario, fecha=selected_date)
+
+			if cierre is None:
+				try:
+					cierre = ArqueoCaja(
+						id_sede=target_sede_id,
+						id_turno=target_turno_id,
+						id_usuario=current_user.id_usuario,
+						fecha=selected_date,
+					)
 					db.session.add(cierre)
 					db.session.flush()
-				try:
-					locked_fields = set(json.loads(cierre.campos_bloqueados_json or '[]'))
-				except (TypeError, ValueError):
-					locked_fields = set()
-				allowed_numeric = {'monto_inicial', 'pos_tarjetas', 'yape', 'plin', 'efectivo', 'venta_sistema'}
-				for field in allowed_numeric:
-					if field not in fields or (field in locked_fields and not is_admin_general):
-						continue
-					raw_value = fields.get(field)
-					if raw_value in ('', None):
-						continue
-					old_value = getattr(cierre, field)
-					new_value = _safe_float(raw_value, old_value or 0.0)
-					setattr(cierre, field, new_value)
-					locked_fields.add(field)
-					_audit_arqueo_event(cierre, 'AUTOGUARDADO_5MIN' if is_autosave else 'GUARDADO_MANUAL', field, old_value, new_value)
-					if field == 'venta_sistema':
-						cierre.venta_sistema_guardada = True
+				except IntegrityError:
+					db.session.rollback()
+					cierre = ArqueoCaja.query.filter(
+						ArqueoCaja.id_sede == target_sede_id,
+						ArqueoCaja.id_turno == target_turno_id,
+						ArqueoCaja.fecha == selected_date,
+					).first()
 
-				audit_enabled = bool(
-					cierre.venta_sistema_guardada
-					and locked_fields.intersection({'pos_tarjetas', 'yape', 'plin', 'efectivo'})
-				)
+			if request.is_json:
+				payload = request.get_json(silent=True) or {}
+			else:
+				payload = {'fields': _extract_fields_from_form(request.form)}
 
-				if 'observaciones' in fields:
-					old_value = cierre.observaciones or ''
-					new_value = str(fields.get('observaciones') or '')
-					if old_value != new_value:
-						cierre.observaciones = new_value
-						_audit_arqueo_event(cierre, 'AUTOGUARDADO_5MIN' if is_autosave else 'GUARDADO_MANUAL', 'observaciones', old_value, new_value)
+			result = _process_arqueo_save(cierre, payload, is_admin_general, current_user, target_sede_id)
 
-				if 'efectivo_entregado' in fields and (('efectivo_entregado' not in locked_fields) or is_admin_general):
-					raw_value = fields.get('efectivo_entregado')
-					if raw_value not in ('', None) and audit_enabled:
-						old_value = cierre.efectivo_entregado
-						cierre.efectivo_entregado = _safe_float(raw_value, old_value or 0.0)
-						cierre.efectivo_entregado_guardado = True
-						locked_fields.add('efectivo_entregado')
-						_audit_arqueo_event(cierre, 'AUTOGUARDADO_5MIN' if is_autosave else 'GUARDADO_MANUAL', 'efectivo_entregado', old_value, cierre.efectivo_entregado)
-
-				if 'efectivo_dejado_caja_real' in fields and (('efectivo_dejado_caja_real' not in locked_fields) or is_admin_general):
-					raw_value = fields.get('efectivo_dejado_caja_real')
-					if raw_value not in ('', None) and cierre.efectivo_entregado_guardado:
-						recommended = (cierre.efectivo or 0.0) - (cierre.efectivo_entregado or 0.0)
-						old_value = cierre.efectivo_dejado_caja_real
-						cierre.efectivo_dejado_caja_recomendado = recommended
-						cierre.efectivo_dejado_caja_real = _safe_float(raw_value, old_value or 0.0)
-						cierre.diferencia_efectivo_dejado = cierre.efectivo_dejado_caja_real - recommended
-						cierre.efectivo_dejado_guardado = True
-						locked_fields.add('efectivo_dejado_caja_real')
-						_audit_arqueo_event(cierre, 'AUTOGUARDADO_5MIN' if is_autosave else 'GUARDADO_MANUAL', 'efectivo_dejado_caja_real', old_value, cierre.efectivo_dejado_caja_real)
-
-				if 'gastos' in fields and (not cierre.venta_sistema_guardada or is_admin_general):
-					incoming = fields.get('gastos') or []
-					try:
-						current_gastos = json.loads(cierre.gastos_json or '[]')
-					except (TypeError, ValueError):
-						current_gastos = []
-					by_id = {str(item.get('id')): item for item in current_gastos if item.get('id') is not None}
-					for item in incoming:
-						if _safe_float(item.get('monto'), 0.0) <= 0:
-							continue
-						item_id = str(item.get('id') or f'gasto-{len(by_id) + 1}')
-						if item_id in by_id and by_id[item_id].get('bloqueado') and not is_admin_general:
-							continue
-						item['id'] = item_id
-						item['bloqueado'] = True
-						by_id[item_id] = item
-					cierre.gastos_json = json.dumps(list(by_id.values()), ensure_ascii=True)
-					_audit_arqueo_event(cierre, 'AUTOGUARDADO_5MIN' if is_autosave else 'GUARDADO_MANUAL', 'gastos', None, list(by_id.values()))
-
-				cierre.efectivo_a_entregar = (cierre.efectivo or 0.0) - _safe_float(Sede.query.get(target_sede_id).monto_inicial_base_esperado if Sede.query.get(target_sede_id) else 0.0)
-				cierre.monto_final = _calc_cierre_operativo(cierre.monto_inicial or 0.0, cierre.pos_tarjetas or 0.0, cierre.yape or 0.0, cierre.plin or 0.0, cierre.efectivo or 0.0, cierre.venta_sistema or 0.0, json.loads(cierre.gastos_json or '[]'))['subtotal']
-				cierre.campos_bloqueados_json = json.dumps(sorted(locked_fields))
-				db.session.commit()
-				logs = ArqueoCajaHistorial.query.filter_by(id_arqueo=cierre.id_arqueo).order_by(ArqueoCajaHistorial.fecha_hora.desc()).limit(50).all()
-				logs_payload = [
-					{
-						'id': log.id_historial,
-						'fecha_hora': log.fecha_hora.strftime('%Y-%m-%d %H:%M:%S') if log.fecha_hora else '',
-						'usuario_id': log.usuario_id or '',
-						'tipo_evento': log.tipo_evento or 'GUARDADO_MANUAL',
-						'campo': log.campo_o_seccion_afectada or log.accion or '',
-						'valor_anterior': log.valor_anterior or '',
-						'valor_nuevo': log.valor_nuevo or '',
-					}
-					for log in logs
-				]
-				audit_enabled = bool(
-					cierre.venta_sistema_guardada
-					and locked_fields.intersection({'pos_tarjetas', 'yape', 'plin', 'efectivo'})
-				)
-				response_data = {
-					'ok': True,
-					'locked_fields': sorted(locked_fields),
-					'venta_sistema_guardada': bool(cierre.venta_sistema_guardada),
-					'audit_enabled': audit_enabled,
-					'efectivo_entregado_guardado': bool(cierre.efectivo_entregado_guardado),
-					'efectivo_dejado_guardado': bool(cierre.efectivo_dejado_guardado),
-					'closure_complete': bool(cierre.efectivo_dejado_guardado),
-					'logs': logs_payload,
-					'message': 'Guardado correctamente.',
-				}
-				if request.is_json:
-					return response_data
-				return redirect(url_for('arqueo', sede=target_sede_id, turno=target_turno_id))
-			if cierre is None:
-				cierre = ArqueoCaja(
-					id_sede=target_sede_id,
-					id_turno=target_turno_id,
-					id_usuario=current_user.id_usuario,
-					fecha=selected_date,
-				)
-				db.session.add(cierre)
-				db.session.flush()
-
-			if section == 'observaciones':
-				old_value = cierre.observaciones or ''
-				new_value = request.form.get('observaciones', '').strip()
-				if old_value != new_value:
-					_audit_arqueo(cierre, 'ACTUALIZAR_OBSERVACION', old_value, new_value)
-					cierre.observaciones = new_value
-			elif section == 'section1':
-				if cierre.seccion_1_guardada and not is_admin_general:
-					flash('La Seccion 1 ya esta bloqueada para Administrador de Sala.', 'error')
-					return redirect(url_for('arqueo'))
-				if not request.form.get('monto_inicial', '').strip():
-					flash('El Monto Base Colocado es obligatorio.', 'error')
-					return redirect(url_for('arqueo', sede=target_sede_id, turno=target_turno_id) if is_admin_general else url_for('arqueo'))
-				monto_inicial = _safe_float(request.form.get('monto_inicial'), 0.0)
-				pos_tarjetas = _safe_float(request.form.get('pos_tarjetas'), 0.0)
-				yape = _safe_float(request.form.get('yape'), 0.0)
-				plin = _safe_float(request.form.get('plin'), 0.0)
-				efectivo = _safe_float(request.form.get('efectivo'), 0.0)
-				venta_sistema = _safe_float(request.form.get('venta_sistema'), 0.0)
-				gastos = _parse_gastos_from_form(request.form)
-				old_value = {
-					'monto_inicial': cierre.monto_inicial,
-					'pos_tarjetas': cierre.pos_tarjetas,
-					'yape': cierre.yape,
-					'plin': cierre.plin,
-					'efectivo': cierre.efectivo,
-					'venta_sistema': cierre.venta_sistema,
-					'gastos': cierre.gastos_json or '[]',
-				}
-				cierre.monto_inicial = monto_inicial
-				cierre.pos_tarjetas = pos_tarjetas
-				cierre.yape = yape
-				cierre.plin = plin
-				cierre.efectivo = efectivo
-				cierre.venta_sistema = venta_sistema
-				cierre.gastos_json = json.dumps(gastos, ensure_ascii=True)
-				cierre.monto_final = _calc_cierre_operativo(monto_inicial, pos_tarjetas, yape, plin, efectivo, venta_sistema, gastos)['subtotal']
-				cierre.seccion_1_guardada = True
-				_audit_arqueo(cierre, 'MODIFICAR_GASTO' if old_value['gastos'] != cierre.gastos_json else 'GUARDAR_SECCION_1', old_value, {
-					'monto_inicial': monto_inicial, 'pos_tarjetas': pos_tarjetas, 'yape': yape,
-					'plin': plin, 'efectivo': efectivo, 'venta_sistema': venta_sistema, 'gastos': gastos,
-				})
-			elif section == 'efectivo_entregado':
-				if not cierre.seccion_1_guardada and not is_admin_general:
-					flash('Primero debes guardar la Seccion 1.', 'error')
-					return redirect(url_for('arqueo'))
-				if cierre.efectivo_entregado_guardado and not is_admin_general:
-					flash('El efectivo entregado ya esta bloqueado.', 'error')
-					return redirect(url_for('arqueo'))
-				if not request.form.get('efectivo_entregado', '').strip():
-					flash('El efectivo entregado es obligatorio.', 'error')
-					return redirect(url_for('arqueo'))
-				old_value = cierre.efectivo_entregado
-				cierre.efectivo_entregado = _safe_float(request.form.get('efectivo_entregado'), 0.0)
-				cierre.efectivo_a_entregar = cierre.efectivo - _safe_float(Sede.query.get(target_sede_id).monto_inicial_base_esperado if Sede.query.get(target_sede_id) else 0.0)
-				cierre.efectivo_entregado_guardado = True
-				_audit_arqueo(cierre, 'GUARDAR_EFECTIVO_ENTREGADO', old_value, cierre.efectivo_entregado)
-			elif section == 'efectivo_dejado':
-				if not cierre.efectivo_entregado_guardado and not is_admin_general:
-					flash('Primero debes guardar el efectivo entregado.', 'error')
-					return redirect(url_for('arqueo'))
-				if cierre.efectivo_dejado_guardado and not is_admin_general:
-					flash('El efectivo dejado en caja ya esta bloqueado.', 'error')
-					return redirect(url_for('arqueo'))
-				if not request.form.get('efectivo_dejado_caja_real', '').strip():
-					flash('El efectivo dejado en caja es obligatorio.', 'error')
-					return redirect(url_for('arqueo'))
-				recommended = cierre.efectivo - cierre.efectivo_entregado
-				real_value = _safe_float(request.form.get('efectivo_dejado_caja_real'), 0.0)
-				old_value = {'real': cierre.efectivo_dejado_caja_real, 'difference': cierre.diferencia_efectivo_dejado}
-				cierre.efectivo_dejado_caja_recomendado = recommended
-				cierre.efectivo_dejado_caja_real = real_value
-				cierre.diferencia_efectivo_dejado = real_value - recommended
-				cierre.efectivo_dejado_guardado = True
-				_audit_arqueo(cierre, 'GUARDAR_EFECTIVO_DEJADO', old_value, {'real': real_value, 'difference': cierre.diferencia_efectivo_dejado})
-			elif section == 'propina':
-				gastos = json.loads(cierre.gastos_json or '[]')
-				new_value = _safe_float(request.form.get('propina_monto'), 0.0)
-				old_value = next((_safe_float(item.get('monto')) for item in gastos if item.get('tipo') == 'Propina'), 0.0)
-				if not is_admin_general and new_value < old_value:
-					flash('La propina solo puede aumentarse.', 'error')
-					return redirect(url_for('arqueo'))
-				propina = next((item for item in gastos if item.get('tipo') == 'Propina'), None)
-				if propina:
-					propina['monto'] = new_value
-				else:
-					gastos.append({'nombre': 'Propina', 'tipo': 'Propina', 'monto': new_value})
-				cierre.gastos_json = json.dumps(gastos, ensure_ascii=True)
-				_audit_arqueo(cierre, 'MODIFICAR_PROPINA', old_value, new_value)
-			db.session.commit()
+			if request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+				return jsonify(result)
 			flash('Cambios de cierre guardados.', 'ok')
 			return redirect(url_for('arqueo', sede=target_sede_id, turno=target_turno_id) if is_admin_general else url_for('arqueo'))
 
@@ -3300,8 +3389,6 @@ def create_app():
 			locked_fields = json.loads(cierre.campos_bloqueados_json or '[]') if cierre else []
 		except (TypeError, ValueError):
 			locked_fields = []
-		if cierre and cierre.seccion_1_guardada:
-			locked_fields = sorted(set(locked_fields).union({'monto_inicial', 'pos_tarjetas', 'yape', 'plin', 'efectivo', 'venta_sistema'}))
 		if cierre and cierre.efectivo_entregado_guardado:
 			locked_fields = sorted(set(locked_fields).union({'efectivo_entregado'}))
 		if cierre and cierre.efectivo_dejado_guardado:
