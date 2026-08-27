@@ -537,6 +537,9 @@
 				if (!response.ok) throw new Error('HTTP ' + response.status);
 				return response.json();
 			}).then(function (data) {
+				if (!data || data.ok === false) {
+					throw new Error((data && data.message) || 'No se pudo confirmar el guardado.');
+				}
 				ventaSistemaGuardada = Boolean(data.venta_sistema_guardada);
 				auditEnabled = Boolean(data.audit_enabled);
 				efectivoEntregadoGuardado = Boolean(data.efectivo_entregado_guardado);
@@ -548,8 +551,8 @@
 				dirtyFields.clear();
 				setStatus(data.message || 'Guardado correctamente.');
 				if (Object.prototype.hasOwnProperty.call(fields, 'efectivo_dejado_caja_real') || data.closure_complete) showSuccessToast();
-			}).catch(function () {
-				setStatus('No se pudo guardar. Revisa la conexión e inténtalo nuevamente.');
+			}).catch(function (error) {
+				setStatus((error && error.message) || 'No se pudo guardar. Revisa la conexión e inténtalo nuevamente.');
 			}).finally(function () {
 				if (saveBtn) saveBtn.disabled = false;
 			});

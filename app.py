@@ -723,7 +723,20 @@ def _process_arqueo_save(cierre, payload, is_admin_general, current_user, target
 	)
 	cierre.monto_final = res_calc['subtotal']
 	cierre.campos_bloqueados_json = json.dumps(sorted(locked_fields))
+	gastos_esperados = cierre.gastos_json or '[]'
 	db.session.commit()
+
+	# Para Admin General no basta con que el commit no lance excepción: se vuelve
+	# a leer el cierre desde la base de datos antes de confirmar el guardado.
+	if is_admin_general:
+		db.session.expire_all()
+		cierre_verificado = db.session.get(ArqueoCaja, cierre.id_arqueo)
+		if not cierre_verificado or (cierre_verificado.gastos_json or '[]') != gastos_esperados:
+			return {
+				'ok': False,
+				'message': 'No se pudo confirmar el guardado en la base de datos. No se aplicaron cambios visibles; vuelve a intentarlo.',
+			}
+		cierre = cierre_verificado
 
 	gastos_final = json.loads(cierre.gastos_json or '[]')
 	logs = _historial_arqueo_por_alcance(cierre)
