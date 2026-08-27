@@ -3514,6 +3514,8 @@ def create_app():
 
 		sedes_disponibles = []
 		turnos_disponibles = []
+		target_sede = Sede.query.get(target_sede_id)
+		target_turno = Turno.query.get(target_turno_id)
 		if is_admin_general:
 			sedes_disponibles = Sede.query.order_by(Sede.nombre_sede.asc()).all()
 			turnos_disponibles = Turno.query.order_by(Turno.nombre_turno.asc()).all()
@@ -3529,6 +3531,8 @@ def create_app():
 			historial_auditoria=historial_auditoria,
 			target_sede_id=target_sede_id,
 			target_turno_id=target_turno_id,
+			target_sede_nombre=target_sede.nombre_sede if target_sede else f'Sede {target_sede_id}',
+			target_turno_nombre=target_turno.nombre_turno if target_turno else target_turno_id,
 			sedes_disponibles=sedes_disponibles,
 			turnos_disponibles=turnos_disponibles,
 			is_admin_general=is_admin_general,
@@ -3537,7 +3541,7 @@ def create_app():
 				can_insert=current_user.can_write('arqueo', 'insert'),
 			can_update=current_user.can_write('arqueo', 'update'),
 				# Monto inicial base esperado por sede (solo admin_general lo configura)
-				expected_base=(Sede.query.get(target_sede_id).monto_inicial_base_esperado if Sede.query.get(target_sede_id) else 0.0),
+			expected_base=(target_sede.monto_inicial_base_esperado if target_sede else 0.0),
 			loop_month=selected_date.strftime('%Y-%m') if is_admin_general else '',
 		)
 

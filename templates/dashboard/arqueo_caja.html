@@ -259,7 +259,7 @@
 	<div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #e5e7eb;padding-bottom:10px;margin-bottom:12px;">
 		<div>
 			<strong style="font-size:22px;display:block;">Comprobante de Arqueo</strong>
-			<div style="font-size:12px;color:#6b7280;">Fecha: {{ selected_date.strftime('%d/%m/%Y') if selected_date else '' }} · Sede: {{ current_user.sede.nombre_sede if current_user.sede else 'Sede' }} · Turno: {{ current_user.turno.nombre_turno if current_user.turno else target_turno_id }}</div>
+			<div style="font-size:12px;color:#6b7280;">Fecha: {{ selected_date.strftime('%d/%m/%Y') if selected_date else '' }} · Sede: {{ target_sede_nombre }} · Turno: {{ target_turno_nombre }}</div>
 			<div style="font-size:12px;color:#6b7280;margin-top:4px;">Usuario responsable: {{ current_user.username }}</div>
 		</div>
 		<img src="{{ url_for('static', filename='img/icono.png') }}" alt="Icono" style="width:42px;height:42px;border-radius:12px;">
