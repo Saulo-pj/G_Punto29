@@ -523,6 +523,29 @@ def _parse_gastos_from_form(form_data):
 	return gastos
 
 
+def _normalizar_gastos_arqueo(gastos):
+	"""Asegura que cada gasto tenga un identificador persistente y único."""
+	normalizados = []
+	ids_vistos = set()
+	cambio = False
+	for gasto in gastos or []:
+		if not isinstance(gasto, dict):
+			cambio = True
+			continue
+		item = dict(gasto)
+		item_id = str(item.get('id') or '').strip()
+		if not item_id or item_id in ids_vistos:
+			item_id = f'gasto-{uuid.uuid4().hex}'
+			item['id'] = item_id
+			cambio = True
+		ids_vistos.add(item_id)
+		if 'bloqueado' not in item:
+			item['bloqueado'] = True
+			cambio = True
+		normalizados.append(item)
+	return normalizados, cambio
+
+
 def _extract_fields_from_form(form_data):
 	fields = {}
 	for k in ('monto_inicial', 'pos_tarjetas', 'yape', 'plin', 'efectivo', 'venta_sistema', 'observaciones', 'efectivo_entregado', 'efectivo_dejado_caja_real'):
@@ -604,6 +627,7 @@ def _process_arqueo_save(cierre, payload, is_admin_general, current_user, target
 			current_gastos = json.loads(cierre.gastos_json or '[]')
 		except (TypeError, ValueError):
 			current_gastos = []
+		current_gastos, _ = _normalizar_gastos_arqueo(current_gastos)
 
 		if is_admin_general:
 			new_gastos_list = []
@@ -612,7 +636,7 @@ def _process_arqueo_save(cierre, payload, is_admin_general, current_user, target
 				nombre = str(item.get('nombre') or '').strip()
 				tipo = str(item.get('tipo') or 'Otros').strip()
 				if monto > 0 or nombre:
-					item_id = str(item.get('id') or f'gasto-{idx + 1}')
+					item_id = str(item.get('id') or f'gasto-{uuid.uuid4().hex}')
 					new_gastos_list.append({
 						'id': item_id,
 						'tipo': tipo,
@@ -3412,6 +3436,10 @@ def create_app():
 				gastos_actuales = []
 		else:
 			gastos_actuales = []
+		gastos_actuales, gastos_normalizados = _normalizar_gastos_arqueo(gastos_actuales)
+		if cierre and gastos_normalizados:
+			cierre.gastos_json = json.dumps(gastos_actuales, ensure_ascii=True)
+			db.session.commit()
 
 		monto_inicial = _safe_float(cierre.monto_inicial if cierre else 0.0, 0.0)
 		pos_tarjetas = _safe_float(cierre.pos_tarjetas if cierre else 0.0, 0.0)

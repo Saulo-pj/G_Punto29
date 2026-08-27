@@ -761,10 +761,12 @@
 						row.querySelector('input[name="gasto_nombre[]"]').value = '';
 						row.querySelector('input[name="gasto_monto[]"]').value = '';
 						updateSummary();
+						markDirty('gastos');
 						return;
 					}
 					row.remove();
 					updateSummary();
+					markDirty('gastos');
 				});
 			});
 		}
@@ -796,6 +798,9 @@
 		});
 
 		list.addEventListener('change', function (event) {
+			if (event.target && ['gasto_tipo[]', 'gasto_nombre[]', 'gasto_monto[]'].includes(event.target.name)) {
+				markDirty('gastos');
+			}
 			if (event.target && event.target.name === 'gasto_tipo[]') {
 				Array.from(list.querySelectorAll('.gasto-item')).sort(function (left, right) {
 					return (left.querySelector('select').value || '').localeCompare(right.querySelector('select').value || '');
@@ -804,8 +809,9 @@
 		});
 
 		list.addEventListener('input', function (event) {
-			if (event.target && event.target.name === 'gasto_monto[]') {
-				updateSummary();
+			if (event.target && ['gasto_nombre[]', 'gasto_monto[]'].includes(event.target.name)) {
+				markDirty('gastos');
+				if (event.target.name === 'gasto_monto[]') updateSummary();
 			}
 		});
 
