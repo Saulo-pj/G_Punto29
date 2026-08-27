@@ -24,13 +24,13 @@
 		<div class="pedidos-detail-head" data-sede="{{ selected_sede_nombre or '' }}" data-turno="{{ selected_turno_nombre or '' }}">
 			<h3>Pedido #{{ selected_pedido.id_pedido }}</h3>
 			<span class="status-pill {% if selected_pedido.estado_general == 'Enviado' %}info{% elif selected_pedido.estado_general == 'Pendiente' %}warn{% endif %}">{{ selected_pedido.estado_general }}</span>
-			<div class="pedidos-detail-actions">
-				<select id="pedido-print-format" title="Formato de impresión">
+			<form class="pedidos-detail-actions" method="GET" action="{{ url_for('imprimir_pedido', id_pedido=selected_pedido.id_pedido) }}" target="_blank">
+				<select name="formato" title="Formato de impresión">
 					<option value="A4">A4</option>
 					<option value="80mm">Ticket 80mm</option>
 				</select>
-				<button id="pedido-print-btn" class="btn-outline">Imprimir lista</button>
-			</div>
+				<button type="submit" class="btn-outline">Imprimir lista</button>
+			</form>
 		</div>
 		<p class="muted">Ajusta cantidad de envío (por defecto sale la pedida) y marca checkbox por línea.</p>
 

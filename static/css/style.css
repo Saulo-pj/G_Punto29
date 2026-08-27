@@ -187,14 +187,11 @@ body {
 }
 
 .date-box-form input[type="date"] {
-	position: absolute;
-	opacity: 0;
+	position: static;
+	opacity: 1;
 	pointer-events: auto;
 	width: 100%;
-	height: 100%;
-	left: 0;
-	top: 0;
-	z-index: 4;
+	height: auto;
 	cursor: pointer;
 }
 

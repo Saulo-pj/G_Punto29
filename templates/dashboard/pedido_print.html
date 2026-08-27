@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Pedido #{{ pedido.id_pedido }}</title>
+    <style>
+        @page { size: {% if formato == '80mm' %}80mm auto{% else %}A4{% endif %}; margin: {% if formato == '80mm' %}5mm{% else %}12mm{% endif %}; }
+        body { font-family: Arial, Helvetica, sans-serif; color: #111; margin: 0; {% if formato == '80mm' %}width: 70mm; font-size: 12px;{% else %}font-size: 14px;{% endif %} }
+        h1 { margin: 0 0 4px; font-size: {% if formato == '80mm' %}18px{% else %}24px{% endif %}; }
+        .meta { color: #444; margin-bottom: 14px; }
+        h2 { font-size: {% if formato == '80mm' %}14px{% else %}17px{% endif %}; margin: 14px 0 6px; border-bottom: 1px solid #555; padding-bottom: 4px; }
+        table { width: 100%; border-collapse: collapse; }
+        td { padding: 5px 0; border-bottom: 1px solid #ddd; vertical-align: top; }
+        td:last-child { text-align: right; white-space: nowrap; padding-left: 12px; }
+        .signatures { display: flex; gap: 24px; margin-top: 35px; }
+        .signature { flex: 1; border-top: 1px solid #111; padding-top: 5px; text-align: center; font-size: 12px; }
+    </style>
+</head>
+<body onload="window.print()">
+    <h1>Pedido #{{ pedido.id_pedido }}</h1>
+    <div class="meta">{{ pedido.fecha.strftime('%d/%m/%Y') if pedido.fecha else '' }} · {{ sede.nombre_sede if sede else '-' }} · {{ turno.nombre_turno if turno else '-' }} · {{ pedido.estado_general }}</div>
+    <h2>Enviando</h2>
+    <table>
+        {% for detalle, producto in items if (detalle.cantidad_entregada or 0) > 0 %}
+        <tr><td>{{ producto.nombre_producto }}</td><td>{{ '%g'|format(detalle.cantidad_entregada) }} {{ producto.unidad or '' }}</td></tr>
+        {% else %}<tr><td>No hay productos enviados.</td><td></td></tr>{% endfor %}
+    </table>
+    <h2>No enviado por falta de stock</h2>
+    <table>
+        {% for detalle, producto in items if (detalle.cantidad_entregada or 0) <= 0 %}
+        <tr><td>{{ producto.nombre_producto }}</td><td>{{ '%g'|format(detalle.cantidad_pedida or 0) }} {{ producto.unidad or '' }}</td></tr>
+        {% else %}<tr><td>No hay productos pendientes.</td><td></td></tr>{% endfor %}
+    </table>
+    <div class="signatures"><div class="signature">Enviado por</div><div class="signature">Recibido por</div></div>
+</body>
+</html>

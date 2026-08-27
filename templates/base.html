@@ -114,8 +114,8 @@
                     <img src="{{ url_for('static', filename='img/logo.png') }}" alt="Punto 29 Logo">
                 </div>
                 <form class="date-box-form" method="POST" action="{{ url_for('set_app_date') }}">
-                    <input type="date" id="app-date-input" name="app_date" value="{{ today_value }}">
-                    <button id="app-date-button" class="date-box" type="button">{{ today_text }}</button>
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input class="date-box" type="date" id="app-date-input" name="app_date" value="{{ today_value }}" aria-label="Fecha de operación" onchange="this.form.submit()">
                 </form>
             </header>
 
@@ -161,40 +161,6 @@
                 if (window.innerWidth > 900) {
                     closeMenu();
                 }
-            });
-        })();
-    </script>
-    <script>
-        (function () {
-            var form = document.querySelector('.date-box-form');
-            var button = document.getElementById('app-date-button');
-            var input = document.getElementById('app-date-input');
-            if (!form || !button || !input) {
-                return;
-            }
-
-            function isIOSLike() {
-                var ua = window.navigator.userAgent || '';
-                return /iPad|iPhone|iPod/.test(ua) || (window.navigator.platform === 'MacIntel' && window.navigator.maxTouchPoints > 1);
-            }
-
-            if (isIOSLike()) {
-                form.classList.add('ios-date-overlay');
-            }
-
-            function openPicker() {
-                if (typeof input.showPicker === 'function') {
-                    input.showPicker();
-                    return;
-                }
-
-                input.focus();
-                input.click();
-            }
-
-            button.addEventListener('click', openPicker);
-            input.addEventListener('change', function () {
-                form.submit();
             });
         })();
     </script>

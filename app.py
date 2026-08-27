@@ -2431,6 +2431,39 @@ def create_app():
 			can_delete_requested=can_delete_requested,
 		)
 
+	@app.route('/pedidos/<int:id_pedido>/imprimir', methods=['GET'])
+	@login_required
+	def imprimir_pedido(id_pedido):
+		if not current_user.can_view('pedidos'):
+			return _forbidden_redirect()
+
+		pedido = db.session.get(ChecklistPedido, id_pedido)
+		if not pedido:
+			flash('Pedido no encontrado.', 'error')
+			return redirect(url_for('pedidos'))
+		if current_user.rol_nombre not in {'admin_general', 'admin_almacen', 'personal_prod'} and pedido.id_sede != current_user.id_sede:
+			return _forbidden_redirect()
+
+		formato = request.args.get('formato', 'A4')
+		if formato not in {'A4', '80mm'}:
+			formato = 'A4'
+		items = db.session.query(DetallePedido, Producto).join(
+			Producto, Producto.id_producto == DetallePedido.id_producto
+		).filter(
+			DetallePedido.id_pedido == pedido.id_pedido,
+			DetallePedido.cantidad_pedida > 0,
+		).order_by(Producto.nombre_producto.asc()).all()
+		sede = db.session.get(Sede, pedido.id_sede) if pedido.id_sede else None
+		turno = db.session.get(Turno, pedido.id_turno) if pedido.id_turno else None
+		return render_template(
+			'dashboard/pedido_print.html',
+			pedido=pedido,
+			items=items,
+			sede=sede,
+			turno=turno,
+			formato=formato,
+		)
+
 	@app.route('/checklist', methods=['GET', 'POST'])
 	@login_required
 	def checklist():
