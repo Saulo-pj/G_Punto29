@@ -546,6 +546,29 @@ def _normalizar_gastos_arqueo(gastos):
 	return normalizados, cambio
 
 
+def _cambios_gastos_arqueo(anterior, nuevo):
+	"""Devuelve sólo las filas de gastos que realmente cambiaron.
+
+	El historial conserva dos columnas (antes/después), por eso una alta se
+	registra como ``[] -> [gasto]``, una edición como ``[antes] -> [después]`` y
+	una eliminación como ``[gasto] -> []``.
+	"""
+	antes_por_id = {str(item.get('id')): item for item in anterior if item.get('id')}
+	nuevos_por_id = {str(item.get('id')): item for item in nuevo if item.get('id')}
+	antes = []
+	despues = []
+	for item_id in sorted(set(antes_por_id) | set(nuevos_por_id)):
+		valor_anterior = antes_por_id.get(item_id)
+		valor_nuevo = nuevos_por_id.get(item_id)
+		if valor_anterior == valor_nuevo:
+			continue
+		if valor_anterior is not None:
+			antes.append(valor_anterior)
+		if valor_nuevo is not None:
+			despues.append(valor_nuevo)
+	return antes, despues
+
+
 def _extract_fields_from_form(form_data):
 	fields = {}
 	for k in ('monto_inicial', 'pos_tarjetas', 'yape', 'plin', 'efectivo', 'venta_sistema', 'observaciones', 'efectivo_entregado', 'efectivo_dejado_caja_real'):
@@ -645,7 +668,9 @@ def _process_arqueo_save(cierre, payload, is_admin_general, current_user, target
 						'bloqueado': True,
 					})
 			cierre.gastos_json = json.dumps(new_gastos_list, ensure_ascii=True)
-			_audit('gastos', current_gastos, new_gastos_list)
+			gastos_antes, gastos_despues = _cambios_gastos_arqueo(current_gastos, new_gastos_list)
+			if gastos_antes or gastos_despues:
+				_audit('gastos', gastos_antes, gastos_despues)
 		else:
 			by_id = {str(item.get('id')): dict(item) for item in current_gastos if item.get('id') is not None}
 			for idx, item in enumerate(incoming):
@@ -679,7 +704,10 @@ def _process_arqueo_save(cierre, payload, is_admin_general, current_user, target
 						'bloqueado': True,
 					}
 			cierre.gastos_json = json.dumps(list(by_id.values()), ensure_ascii=True)
-			_audit('gastos', current_gastos, list(by_id.values()))
+			gastos_finales = list(by_id.values())
+			gastos_antes, gastos_despues = _cambios_gastos_arqueo(current_gastos, gastos_finales)
+			if gastos_antes or gastos_despues:
+				_audit('gastos', gastos_antes, gastos_despues)
 
 	sede_obj = Sede.query.get(target_sede_id)
 	expected_base = _safe_float(sede_obj.monto_inicial_base_esperado if sede_obj else 0.0)
