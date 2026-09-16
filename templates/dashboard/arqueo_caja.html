@@ -56,7 +56,7 @@
 	<fieldset>
 	<div>
 		<label>Monto Base Colocado (entrada manual)</label>
-		<input type="number" step="0.01" name="monto_inicial" value="{% if cierre and ('monto_inicial' in locked_fields or is_admin_general) and cierre.monto_inicial is not none %}{{ '%.2f'|format(cierre.monto_inicial) }}{% endif %}" placeholder="0.00">
+		<input type="number" step="0.01" name="monto_inicial" value="{% if cierre and ('monto_inicial' in locked_fields or is_admin_general or is_historical) and cierre.monto_inicial is not none %}{{ '%.2f'|format(cierre.monto_inicial) }}{% endif %}" placeholder="0.00">
 		{% if expected_base is defined %}
 			<div class="muted">Monto inicial base esperado (config): {{ '%.2f'|format(expected_base) }}</div>
 		{% endif %}
@@ -112,33 +112,33 @@
 			<label class="canal-label" for="pos_tarjetas">POS (Tarjetas)</label>
 			<div class="canal-control">
 				<img class="canal-icon" src="{{ url_for('static', filename='img/visa.png') }}" alt="Tarjetas">
-				<input id="pos_tarjetas" type="number" step="0.01" name="pos_tarjetas" value="{% if cierre and ('pos_tarjetas' in locked_fields or is_admin_general) and cierre.pos_tarjetas is not none %}{{ '%.2f'|format(cierre.pos_tarjetas) }}{% endif %}" placeholder="0.00">
+				<input id="pos_tarjetas" type="number" step="0.01" name="pos_tarjetas" value="{% if cierre and ('pos_tarjetas' in locked_fields or is_admin_general or is_historical) and cierre.pos_tarjetas is not none %}{{ '%.2f'|format(cierre.pos_tarjetas) }}{% endif %}" placeholder="0.00">
 			</div>
 		</div>
 		<div class="ingreso-canal-item">
 			<label class="canal-label" for="yape">Yape</label>
 			<div class="canal-control">
 				<img class="canal-icon" src="{{ url_for('static', filename='img/logo-yape.png') }}" alt="Yape">
-				<input id="yape" type="number" step="0.01" name="yape" value="{% if cierre and ('yape' in locked_fields or is_admin_general) and cierre.yape is not none %}{{ '%.2f'|format(cierre.yape) }}{% endif %}" placeholder="0.00">
+				<input id="yape" type="number" step="0.01" name="yape" value="{% if cierre and ('yape' in locked_fields or is_admin_general or is_historical) and cierre.yape is not none %}{{ '%.2f'|format(cierre.yape) }}{% endif %}" placeholder="0.00">
 			</div>
 		</div>
 		<div class="ingreso-canal-item">
 			<label class="canal-label" for="plin">Plin</label>
 			<div class="canal-control">
 				<img class="canal-icon" src="{{ url_for('static', filename='img/logo-plin.png') }}" alt="Plin">
-				<input id="plin" type="number" step="0.01" name="plin" value="{% if cierre and ('plin' in locked_fields or is_admin_general) and cierre.plin is not none %}{{ '%.2f'|format(cierre.plin) }}{% endif %}" placeholder="0.00">
+				<input id="plin" type="number" step="0.01" name="plin" value="{% if cierre and ('plin' in locked_fields or is_admin_general or is_historical) and cierre.plin is not none %}{{ '%.2f'|format(cierre.plin) }}{% endif %}" placeholder="0.00">
 			</div>
 		</div>
 		<div class="ingreso-canal-item">
 			<label class="canal-label" for="efectivo">Efectivo</label>
 			<div class="canal-control">
 				<img class="canal-icon" src="{{ url_for('static', filename='img/dinero-en-efectivo.png') }}" alt="Efectivo">
-				<input id="efectivo" type="number" step="0.01" name="efectivo" value="{% if cierre and ('efectivo' in locked_fields or is_admin_general) and cierre.efectivo is not none %}{{ '%.2f'|format(cierre.efectivo) }}{% endif %}" placeholder="0.00">
+				<input id="efectivo" type="number" step="0.01" name="efectivo" value="{% if cierre and ('efectivo' in locked_fields or is_admin_general or is_historical) and cierre.efectivo is not none %}{{ '%.2f'|format(cierre.efectivo) }}{% endif %}" placeholder="0.00">
 			</div>
 		</div>
 	</div>
 	<label>Venta del sistema (POS)</label>
-	<input id="venta_sistema" type="number" step="0.01" name="venta_sistema" value="{% if cierre and ('venta_sistema' in locked_fields or cierre.venta_sistema_guardada or is_admin_general) and cierre.venta_sistema is not none %}{{ '%.2f'|format(cierre.venta_sistema) }}{% endif %}" placeholder="0.00">
+	<input id="venta_sistema" type="number" step="0.01" name="venta_sistema" value="{% if cierre and ('venta_sistema' in locked_fields or cierre.venta_sistema_guardada or is_admin_general or is_historical) and cierre.venta_sistema is not none %}{{ '%.2f'|format(cierre.venta_sistema) }}{% endif %}" placeholder="0.00">
 	</fieldset>
 
 	<button type="button" class="section-save-hint" disabled>Se guarda con el botón Guardar</button>
@@ -161,7 +161,7 @@
 		<fieldset {% if not is_admin_general and (not audit_enabled or delivered_locked) %}disabled{% endif %}>
 			<div class="grid-2 audit-fields">
 				<div class="recommendation-box"><label>Recomendación - Efectivo a entregar</label><strong id="recomendado-efectivo">{{ '%.2f'|format((efectivo|default(0)) - (expected_base|default(0))) }}</strong><small>Efectivo - Monto Inicial Base Esperado</small></div>
-				<div class="field-with-icon"><label for="efectivo_entregado">Efectivo entregado</label><div class="canal-control"><img class="canal-icon" src="{{ url_for('static', filename='img/efectivo_entregado.png') }}" alt="Efectivo entregado"><input id="efectivo_entregado" type="number" step="0.01" name="efectivo_entregado" value="{% if cierre and ('efectivo_entregado' in locked_fields or cierre.efectivo_entregado_guardado or is_admin_general) and cierre.efectivo_entregado is not none %}{{ '%.2f'|format(cierre.efectivo_entregado) }}{% endif %}" placeholder="0.00"></div></div>
+				<div class="field-with-icon"><label for="efectivo_entregado">Efectivo entregado</label><div class="canal-control"><img class="canal-icon" src="{{ url_for('static', filename='img/efectivo_entregado.png') }}" alt="Efectivo entregado"><input id="efectivo_entregado" type="number" step="0.01" name="efectivo_entregado" value="{% if cierre and ('efectivo_entregado' in locked_fields or cierre.efectivo_entregado_guardado or is_admin_general or is_historical) and cierre.efectivo_entregado is not none %}{{ '%.2f'|format(cierre.efectivo_entregado) }}{% endif %}" placeholder="0.00"></div></div>
 			</div>
 		</fieldset>
 		<button type="button" class="section-save-hint" disabled>Se guarda con el botón Guardar</button>
@@ -175,7 +175,7 @@
 		<fieldset {% if not is_admin_general and (not (cierre and cierre.efectivo_entregado_guardado) or left_locked) %}disabled{% endif %}>
 			<div class="grid-2 left-cash-fields">
 				<div class="recommendation-box"><label>Efectivo dejado en caja (Recomendado)</label><strong id="efectivo-dejado-recomendado">{{ '%.2f'|format(cierre.efectivo_dejado_caja_recomendado if cierre else ((efectivo|default(0)) - (cierre.efectivo_entregado if cierre else 0))) }}</strong></div>
-				<div class="field-with-icon"><label for="efectivo_dejado_caja_real">Efectivo dejado en caja (Real)</label><div class="canal-control"><img class="canal-icon" src="{{ url_for('static', filename='img/efectivo_dejado_caja.png') }}" alt="Efectivo dejado en caja"><input id="efectivo_dejado_caja_real" type="number" step="0.01" name="efectivo_dejado_caja_real" value="{% if cierre and ('efectivo_dejado_caja_real' in locked_fields or cierre.efectivo_dejado_guardado or is_admin_general) and cierre.efectivo_dejado_caja_real is not none %}{{ '%.2f'|format(cierre.efectivo_dejado_caja_real) }}{% endif %}" placeholder="0.00"></div></div>
+				<div class="field-with-icon"><label for="efectivo_dejado_caja_real">Efectivo dejado en caja (Real)</label><div class="canal-control"><img class="canal-icon" src="{{ url_for('static', filename='img/efectivo_dejado_caja.png') }}" alt="Efectivo dejado en caja"><input id="efectivo_dejado_caja_real" type="number" step="0.01" name="efectivo_dejado_caja_real" value="{% if cierre and ('efectivo_dejado_caja_real' in locked_fields or cierre.efectivo_dejado_guardado or is_admin_general or is_historical) and cierre.efectivo_dejado_caja_real is not none %}{{ '%.2f'|format(cierre.efectivo_dejado_caja_real) }}{% endif %}" placeholder="0.00"></div></div>
 			</div>
 			<div id="diferencia-efectivo-dejado" class="status-pill">Diferencia: {{ '%.2f'|format(cierre.diferencia_efectivo_dejado if cierre else 0) }}</div>
 		</fieldset>

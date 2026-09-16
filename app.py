@@ -3587,6 +3587,7 @@ def create_app():
 			sedes_disponibles=sedes_disponibles,
 			turnos_disponibles=turnos_disponibles,
 			is_admin_general=is_admin_general,
+			is_historical=selected_date < _get_operation_date().date(),
 			locked_fields=locked_fields,
 			audit_enabled=audit_enabled,
 				can_insert=current_user.can_write('arqueo', 'insert'),

@@ -3,6 +3,7 @@ import os
 import re
 import subprocess
 import unittest
+from datetime import date, datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -94,6 +95,56 @@ class TestArqueoAdmin(unittest.TestCase):
     def run_js(self, script):
         result = subprocess.run(['node', '-'], input=script, text=True, capture_output=True)
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_past_closure_without_lock_metadata_shows_same_values_for_both_roles(self):
+        values = dict(monto_inicial=100, pos_tarjetas=200, yape=0, plin=40,
+                      efectivo=500, venta_sistema=660, efectivo_entregado=400,
+                      efectivo_dejado_caja_real=100)
+        with self.app.app_context():
+            db.session.add(ArqueoCaja(
+                id_sede=2, id_turno='NOCHE', id_usuario='sala', fecha=date(2026, 9, 15),
+                campos_bloqueados_json='[]', venta_sistema_guardada=False,
+                efectivo_entregado_guardado=False, efectivo_dejado_guardado=False,
+                gastos_json=json.dumps([dict(id='g1', tipo='Comida', nombre='Cena', monto=20, bloqueado=True)]),
+                **values,
+            ))
+            db.session.commit()
+        for client in (self.general, self.sala):
+            with client.session_transaction() as session:
+                session['app_date'] = '2026-09-15'
+            with patch('app._get_operation_date', return_value=datetime(2026, 9, 16)):
+                page = client.get('/arqueo?sede=2&turno=NOCHE').get_data(as_text=True)
+            for name, value in values.items():
+                self.assertIn(f'name="{name}" value="{value:.2f}"', page, name)
+            self.assertIn('id="sum-total-ingresos">740.00</span>', page)
+            self.assertIn('name="gasto_nombre[]" value="Cena"', page)
+        # Consultar el historico no modifica montos ni marcas de bloqueo/guardado.
+        with self.app.app_context():
+            cierre = ArqueoCaja.query.one()
+            self.assertEqual(cierre.campos_bloqueados_json, '[]')
+            self.assertFalse(cierre.venta_sistema_guardada)
+            self.assertFalse(cierre.efectivo_entregado_guardado)
+            self.assertFalse(cierre.efectivo_dejado_guardado)
+            for name, value in values.items():
+                self.assertEqual(getattr(cierre, name), value)
+
+    def test_current_partial_closure_keeps_unsaved_sala_inputs_empty(self):
+        self.save(self.sala, '/arqueo', {'pos_tarjetas': '200'})
+        with patch('app._get_operation_date', return_value=datetime(2026, 9, 16)):
+            page = self.sala.get('/arqueo').get_data(as_text=True)
+        self.assertIn('name="pos_tarjetas" value="200.00"', page)
+        for name in ('monto_inicial', 'yape', 'plin', 'efectivo', 'venta_sistema',
+                     'efectivo_entregado', 'efectivo_dejado_caja_real'):
+            self.assertIn(f'name="{name}" value=""', page, name)
+
+    def test_past_date_without_closure_keeps_inputs_empty(self):
+        with self.sala.session_transaction() as session:
+            session['app_date'] = '2026-09-15'
+        with patch('app._get_operation_date', return_value=datetime(2026, 9, 16)):
+            page = self.sala.get('/arqueo').get_data(as_text=True)
+        self.assertIn('name="pos_tarjetas" value=""', page)
+        with self.app.app_context():
+            self.assertEqual(ArqueoCaja.query.count(), 0)
 
     def test_cash_sections_respect_each_role_at_every_stage(self):
         function = self.template.split('function lockSavedFields(fields) {', 1)[1].split('function updateGastosState', 1)[0]
