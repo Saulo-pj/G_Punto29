@@ -17,6 +17,8 @@
 ## Comportamiento al iniciar
 - La app crea las tablas si la base esta vacia.
 - La app siembra los datos esenciales iniciales cuando encuentra la base vacia.
+- Si no hay sedes, crea solo `Almacen` para la configuracion inicial. Si ya hay sedes, conserva las registradas y no agrega `Sede_17` ni `Sede_20` al reiniciar o desplegar.
+- Las sedes se guardan en la base indicada por `DATABASE_URL`, no en GitHub. Las sedes de ejemplo creadas por versiones anteriores se pueden eliminar desde Ajustes si no tienen datos asociados.
 - El login usa sesiones persistentes por equipo.
 
 ## Archivos que no debes subir

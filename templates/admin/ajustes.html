@@ -107,9 +107,10 @@
 			<tr><td>{{ u.id_usuario }}</td><td>{{ u.username }}</td><td>{{ u.rol_nombre or '-' }}</td><td>{{ u.sede.nombre_sede if u.sede else 'Sin sede' }}</td><td>{{ u.turno.nombre_turno if u.turno else 'Sin turno' }}</td><td><span class="status-pill ok">Activo</span></td><td><a class="icon-action icon-edit" href="#edit-user-{{ u.id_usuario|replace(' ', '_') }}" title="Editar usuario" aria-label="Editar usuario"></a><form method="POST" onsubmit="return confirm('Estas seguro de eliminar este usuario?');" class="mini-form" style="display:inline"><input type="hidden" name="tipo_form" value="delete_usuario"><input type="hidden" name="id_usuario" value="{{ u.id_usuario }}"><button type="submit" class="btn-danger">Eliminar</button></form></td></tr>
 			<tr id="edit-user-{{ u.id_usuario|replace(' ', '_') }}" class="settings-edit-row is-hidden"><td colspan="7"><form method="POST" class="grid-2">
 					<input type="hidden" name="tipo_form" value="update_usuario">
+					<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 					<input type="hidden" name="old_id_usuario" value="{{ u.id_usuario }}">
-					<input type="text" name="id_usuario" value="{{ u.id_usuario }}" required>
-					<input type="text" name="username" value="{{ u.username }}" required>
+					<input type="text" name="id_usuario" value="{{ u.id_usuario }}" maxlength="50" aria-label="ID usuario" required>
+					<input type="text" name="username" value="{{ u.username }}" maxlength="50" aria-label="Username" required>
 					<input type="password" name="password" placeholder="Nueva password (opcional)">
 					<select name="id_rol" required>{% for r in roles %}<option value="{{ r.id_rol }}" {% if u.id_rol == r.id_rol %}selected{% endif %}>{{ r.nombre_rol }}</option>{% endfor %}</select>
 					<select name="id_sede" required>{% for s in sedes %}<option value="{{ s.id_sede }}" {% if u.id_sede == s.id_sede %}selected{% endif %}>{{ s.nombre_sede }}</option>{% endfor %}</select>

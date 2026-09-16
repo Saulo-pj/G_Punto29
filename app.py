@@ -124,9 +124,9 @@ def _seed_catalogs():
 		for name in ['admin_general', 'admin_almacen', 'personal_prod', 'admin_sala', 'cocinero']:
 			db.session.add(Rol(nombre_rol=name))
 
-	for default_sede in ('Almacen', 'Sede_17', 'Sede_20'):
-		if not Sede.query.filter(db.func.lower(Sede.nombre_sede) == default_sede.lower()).first():
-			db.session.add(Sede(nombre_sede=default_sede))
+	# Solo inicializar una instalacion nueva; las sedes existentes las administra el usuario.
+	if Sede.query.count() == 0:
+		db.session.add(Sede(nombre_sede='Almacen'))
 
 	if Turno.query.count() == 0:
 		for code, name in [('MANANA', 'Manana'), ('NOCHE', 'Noche'), ('NA', 'N/A')]:
@@ -1427,6 +1427,31 @@ def _ensure_inventory_schema(app):
 			connection.execute(text('CREATE UNIQUE INDEX IF NOT EXISTS uq_arqueo_caja_sede_turno_fecha ON arqueo_caja (id_sede, id_turno, fecha)'))
 	except Exception as err:
 		print(f'Aviso al asegurar índice uq_arqueo_caja_sede_turno_fecha: {err}')
+
+
+def _rename_usuario_id(usuario, new_id):
+	"""Cambiar el ID y sus referencias dentro de la transaccion del llamador."""
+	db.session.flush()
+	old_id = usuario.id_usuario
+	users = Usuario.__table__
+	values = {column.name: getattr(usuario, column.name) for column in users.columns}
+	values['id_usuario'] = new_id
+	# Liberar el username unico antes de crear el reemplazo, conservando todo el perfil.
+	temporary_username = f'_rename_{uuid.uuid4().hex}'
+	while Usuario.query.filter_by(username=temporary_username).first():
+		temporary_username = f'_rename_{uuid.uuid4().hex}'
+	db.session.execute(users.update().where(users.c.id_usuario == old_id).values(username=temporary_username))
+	db.session.execute(users.insert().values(**values))
+	# Incluir tambien historiales, mermas, incidencias y agenda, no solo pedidos y caja.
+	for table in db.metadata.sorted_tables:
+		for foreign_key in table.foreign_keys:
+			if foreign_key.target_fullname == 'usuarios.id_usuario':
+				column = foreign_key.parent
+				db.session.execute(table.update().where(column == old_id).values({column.name: new_id}))
+	db.session.execute(users.delete().where(users.c.id_usuario == old_id))
+	db.session.expunge(usuario)
+	db.session.expire_all()
+	return db.session.get(Usuario, new_id)
 
 
 def create_app():
@@ -4297,35 +4322,40 @@ def create_app():
 					flash('El username ya esta en uso.', 'error')
 					return redirect(url_for('ajustes'))
 
-				if new_id != old_id:
-					replacement = Usuario(
-						id_usuario=new_id,
-						username=new_username,
-						password_hash=generate_password_hash(new_password) if new_password else usuario.password_hash,
-						id_rol=int(request.form.get('id_rol', usuario.id_rol)),
-						id_sede=int(request.form.get('id_sede', usuario.id_sede)),
-						id_turno=request.form.get('id_turno', usuario.id_turno),
-					)
-					db.session.add(replacement)
-					db.session.flush()
+				if len(new_id) > 50 or len(new_username) > 50:
+					flash('ID y username deben tener como maximo 50 caracteres.', 'error')
+					return redirect(url_for('ajustes'))
+				try:
+					id_rol = int(request.form.get('id_rol', usuario.id_rol))
+					id_sede = int(request.form.get('id_sede', usuario.id_sede))
+					id_turno = request.form.get('id_turno', usuario.id_turno)
+				except (TypeError, ValueError):
+					flash('Selecciona un rol y una sede validos.', 'error')
+					return redirect(url_for('ajustes'))
+				if not db.session.get(Rol, id_rol) or not db.session.get(Sede, id_sede) or not id_turno or not db.session.get(Turno, id_turno):
+					flash('El rol, la sede o el turno seleccionado ya no existe.', 'error')
+					return redirect(url_for('ajustes'))
 
-					ChecklistPedido.query.filter_by(id_usuario=old_id).update({'id_usuario': new_id})
-					MovimientoInventario.query.filter_by(id_usuario=old_id).update({'id_usuario': new_id})
-					ArqueoCaja.query.filter_by(id_usuario=old_id).update({'id_usuario': new_id})
-					PlantillaChecklistItem.query.filter_by(id_usuario=old_id).update({'id_usuario': new_id})
-					DetallePedido.query.filter_by(id_usuario=old_id).update({'id_usuario': new_id})
-
-					db.session.delete(usuario)
-				else:
+				editing_self = current_user.id_usuario == old_id
+				try:
 					usuario.username = new_username
-					usuario.id_rol = int(request.form.get('id_rol', usuario.id_rol))
-					usuario.id_sede = int(request.form.get('id_sede', usuario.id_sede))
-					usuario.id_turno = request.form.get('id_turno', usuario.id_turno)
+					usuario.id_rol = id_rol
+					usuario.id_sede = id_sede
+					usuario.id_turno = id_turno
 					if new_password:
 						usuario.password_hash = generate_password_hash(new_password)
+					if new_id != old_id:
+						usuario = _rename_usuario_id(usuario, new_id)
+					db.session.commit()
+				except IntegrityError:
+					db.session.rollback()
+					app.logger.exception('No se pudo actualizar el usuario %s', old_id)
+					flash('No se pudo actualizar: hay datos duplicados o referencias en conflicto.', 'error')
+					return redirect(url_for('ajustes'))
 
+				if editing_self and new_id != old_id:
+					login_user(usuario, remember=True, fresh=session.get('_fresh', False))
 				flash('Usuario actualizado correctamente.', 'ok')
-				db.session.commit()
 				return redirect(url_for('ajustes'))
 			elif tipo_form == 'delete_usuario':
 				user_id = request.form.get('id_usuario', '').strip()
