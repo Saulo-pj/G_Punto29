@@ -389,14 +389,14 @@
 			if (auditSection) {
 				var auditForm = auditSection.closest('form');
 				var auditCard = auditForm ? auditForm.closest('.cierre-section') : null;
-				if (auditForm) auditForm.querySelectorAll('fieldset, button').forEach(function (element) { element.disabled = !auditEnabled || (!isAdminGeneral && lockedFields.has('efectivo_entregado')); });
+				if (auditForm) auditForm.querySelectorAll('fieldset, button').forEach(function (element) { element.disabled = !isAdminGeneral && (!auditEnabled || lockedFields.has('efectivo_entregado')); });
 				if (auditCard) auditCard.classList.toggle('is-locked', !auditEnabled && !isAdminGeneral);
 			}
 			var leftSection = document.querySelector('[name="section"][value="efectivo_dejado"]');
 			if (leftSection) {
 				var leftForm = leftSection.closest('form');
 				var leftCard = leftForm ? leftForm.closest('.cierre-section') : null;
-				if (leftForm) leftForm.querySelectorAll('fieldset, button').forEach(function (element) { element.disabled = !efectivoEntregadoGuardado || efectivoDejadoGuardado; });
+				if (leftForm) leftForm.querySelectorAll('fieldset, button').forEach(function (element) { element.disabled = !isAdminGeneral && (!efectivoEntregadoGuardado || efectivoDejadoGuardado); });
 				if (leftCard) leftCard.classList.toggle('is-locked', !efectivoEntregadoGuardado && !isAdminGeneral);
 			}
 		}
@@ -495,7 +495,7 @@
 				var element = document.querySelector('[name="' + name + '"]');
 				if (element && !element.disabled) {
 					var val = element.value.trim();
-					if (val !== '') {
+					if (val !== '' || (isAdminGeneral && name === 'observaciones')) {
 						fields[name] = val;
 					}
 				}
@@ -529,7 +529,7 @@
 
 			if (saveBtn) saveBtn.disabled = true;
 			setStatus(eventName === 'AUTOGUARDADO_5MIN' ? 'Autoguardando...' : 'Guardando...');
-			return fetch('{{ url_for("arqueo", sede=target_sede_id, turno=target_turno_id) }}', {
+			return fetch({{ url_for("arqueo", sede=target_sede_id, turno=target_turno_id)|tojson }}, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
 				body: JSON.stringify({ section: 'partial', event: eventName, fields: fields })
