@@ -412,6 +412,21 @@ function obtenerHorarioReal(
 
     }
 
+    const cambiosPermanentes = obtenerColeccion("historial")
+        .filter(item => Number(item.trabajadorId) === Number(trabajadorId) && item.tipo === "cambio_permanente" && item.fecha && item.fecha <= fecha)
+        .sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)));
+    const cambioVigente = cambiosPermanentes[cambiosPermanentes.length - 1];
+    if (cambioVigente?.datoNuevo) {
+        resultado.sedeId = cambioVigente.datoNuevo.sedeId || resultado.sedeId;
+        resultado.turnoId = cambioVigente.datoNuevo.turnoId || resultado.turnoId;
+        const sedeVigente = obtenerSede(resultado.sedeId);
+        const turnoVigente = obtenerTurno(resultado.turnoId);
+        resultado.sede = sedeVigente?.nombre || resultado.sede;
+        resultado.turno = turnoVigente?.nombre || resultado.turno;
+        resultado.horaInicio = turnoVigente?.horaInicio || resultado.horaInicio;
+        resultado.horaFin = turnoVigente?.horaFin || resultado.horaFin;
+    }
+
 
     return resultado;
 

@@ -39,8 +39,12 @@ function obtenerTrabajador(id) {
 
 function nombreCompleto(trabajador) {
 
-    return `${trabajador.nombre} ${trabajador.apellido}`;
+    return `${trabajador.nombre || ""} ${trabajador.apellido || ""}`.trim();
 
+}
+
+function escaparHTML(valor) {
+    return String(valor ?? "").replace(/[&<>'"]/g, caracter => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[caracter]));
 }
 
 

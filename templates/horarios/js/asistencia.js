@@ -17,8 +17,14 @@ function diferenciaMinutos(horaInicio, horaFin) {
     return fin >= inicio ? fin - inicio : 1440 - inicio + fin;
 }
 
-function calcularTardanza(horaProgramada, horaReal, tolerancia = 0) {
-    const diferencia = diferenciaMinutos(horaProgramada, horaReal);
+function calcularTardanza(horaProgramada, horaReal, tolerancia = 0, horaProgramadaSalida = "") {
+    const programada = minutosDesdeMedianoche(horaProgramada);
+    let real = minutosDesdeMedianoche(horaReal);
+    if (programada === null || real === null) return 0;
+    const salida = minutosDesdeMedianoche(horaProgramadaSalida);
+    const turnoCruzaMedianoche = salida !== null && salida < programada;
+    if (turnoCruzaMedianoche && real < programada && real < 720) real += 1440;
+    const diferencia = Math.max(0, real - programada);
     return Math.max(0, diferencia - Number(tolerancia || 0));
 }
 
@@ -53,7 +59,7 @@ function calcularResumenAsistencia(registro) {
     const trabajador = obtenerTrabajador(registro.trabajadorId);
     const turno = obtenerTurno(registro.turnoId || trabajador?.turnoId);
     const tolerancia = turno?.toleranciaMinutos || 0;
-    const tardanza = calcularTardanza(registro.horaProgramadaEntrada, registro.horaEntrada, tolerancia);
+    const tardanza = calcularTardanza(registro.horaProgramadaEntrada, registro.horaEntrada, tolerancia, registro.horaProgramadaSalida);
     const salidaAnticipada = calcularSalidaAnticipada(registro.horaProgramadaSalida, registro.horaSalida);
     const horasTrabajadas = calcularHorasTrabajadas(registro.horaEntrada, registro.horaSalida);
     const horasProgramadas = calcularHorasTrabajadas(registro.horaProgramadaEntrada, registro.horaProgramadaSalida);

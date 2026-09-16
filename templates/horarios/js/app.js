@@ -466,8 +466,18 @@ function inicializarBotones() {
                 exportarCSV("personal", ["Nombre", "Apellido", "DNI", "Sede", "Turno"], filas);
                 return;
             }
-            const filas = obtenerTrabajadores().map(worker => [worker.nombre, worker.apellido, obtenerSede(worker.sedeId)?.nombre || "", obtenerTurno(worker.turnoId)?.nombre || ""]);
-            exportarCSV(index === 0 ? "horario-mensual" : "horario-semanal", ["Nombre", "Apellido", "Sede", "Turno"], filas);
+            const inicio = new Date();
+            inicio.setHours(0, 0, 0, 0);
+            const dias = index === 0 ? new Date(inicio.getFullYear(), inicio.getMonth() + 1, 0).getDate() : 7;
+            const filas = [];
+            obtenerTrabajadores().forEach(worker => Array.from({ length: dias }, (_, dia) => {
+                const fecha = new Date(inicio);
+                fecha.setDate(index === 0 ? dia + 1 : inicio.getDate() + dia);
+                const fechaISO = formatearFechaISO(fecha);
+                const horario = obtenerHorarioReal(worker.id, fechaISO);
+                filas.push([fechaISO, worker.nombre, worker.apellido, horario?.sede || "", horario?.turno || "", horario?.estado || "", horario?.horaInicio || "", horario?.horaFin || ""]);
+            }));
+            exportarCSV(index === 0 ? "horario-mensual" : "horario-semanal", ["Fecha", "Nombre", "Apellido", "Sede", "Turno", "Estado", "Entrada", "Salida"], filas);
         });
     });
 
@@ -717,13 +727,13 @@ function renderizarTrabajadores() {
                                         <strong>
 
                                             <button class="worker-name-button" type="button" onclick="abrirPerfilTrabajador(${trabajador.id})">
-                                                ${nombreCompleto(trabajador)}
+                                                ${escaparHTML(nombreCompleto(trabajador))}
                                             </button>
 
                                         </strong>
 
 
-                                        <small>Contacto: ${trabajador.telefono || "-"}</small>
+                                        <small>Contacto: ${escaparHTML(trabajador.telefono || "-")}</small>
 
                                     </div>
 
@@ -732,16 +742,16 @@ function renderizarTrabajadores() {
                             </td>
 
 
-                            <td>${trabajador.dni || "-"}</td>
+                            <td>${escaparHTML(trabajador.dni || "-")}</td>
 
-                            <td>${obtenerNombresCargos(trabajador) || "-"}</td>
+                            <td>${escaparHTML(obtenerNombresCargos(trabajador) || "-")}</td>
 
-                            <td>${obtenerColeccion("areas").find(area => Number(area.id) === Number(trabajador.areaId))?.nombre || "-"}</td>
+                            <td>${escaparHTML(obtenerColeccion("areas").find(area => Number(area.id) === Number(trabajador.areaId))?.nombre || "-")}</td>
 
 
                             <td>
 
-                                ${sede?.nombre || "-"}
+                                ${escaparHTML(sede?.nombre || "-")}
 
                             </td>
 
@@ -1826,8 +1836,13 @@ function renderizarAsistencia() {
     const sedeId = Number(document.querySelector("#attendanceSedeFilter")?.value || 0);
     const turnoId = Number(document.querySelector("#attendanceTurnoFilter")?.value || 0);
     const registros = obtenerAsistenciaDelDia(fecha);
+    const trabajadoresVisibles = obtenerTrabajadores().filter(trabajador => {
+        const horario = obtenerHorarioReal(trabajador.id, fecha);
+        return trabajador.estado === "activo" && (!sedeId || Number(horario?.sedeId) === sedeId) && (!turnoId || Number(horario?.turnoId) === turnoId);
+    });
+    const idsVisibles = new Set(trabajadoresVisibles.map(trabajador => Number(trabajador.id)));
     const registroPara = trabajadorId => registros.find(registro => Number(registro.trabajadorId) === Number(trabajadorId));
-    tabla.innerHTML = obtenerTrabajadores().filter(trabajador => trabajador.estado === "activo" && (!sedeId || Number(trabajador.sedeId) === sedeId) && (!turnoId || Number(trabajador.turnoId) === turnoId)).map(trabajador => {
+    tabla.innerHTML = trabajadoresVisibles.map(trabajador => {
         const horario = obtenerHorarioReal(trabajador.id, fecha);
         const registro = registroPara(trabajador.id);
         const turno = obtenerTurno(horario?.turnoId || trabajador.turnoId);
@@ -1837,7 +1852,8 @@ function renderizarAsistencia() {
     }).join("");
     tabla.querySelectorAll("[data-attendance-entry]").forEach(button => button.addEventListener("click", () => registrarAsistenciaDesdeInterfaz(button.dataset.attendanceEntry, "entrada")));
     tabla.querySelectorAll("[data-attendance-exit]").forEach(button => button.addEventListener("click", () => registrarAsistenciaDesdeInterfaz(button.dataset.attendanceExit, "salida")));
-    const resumen = obtenerResumenAsistencia(fecha);
+    const resumenRegistros = registros.filter(registro => idsVisibles.has(Number(registro.trabajadorId)));
+    const resumen = { total: resumenRegistros.length, presentes: resumenRegistros.filter(item => item.horaEntrada).length, tardanzas: resumenRegistros.filter(item => item.tardanza > 0).length, tardanzasLeves: resumenRegistros.filter(item => item.clasificacion?.estado === "tardanza_leve").length, tardanzasGraves: resumenRegistros.filter(item => item.clasificacion?.estado === "tardanza_grave").length, horasExtras: resumenRegistros.reduce((total, item) => total + Number(item.horasExtras || 0), 0) };
     const panel = document.querySelector("#attendanceSummary");
     if (panel) panel.innerHTML = `<span>Total <strong>${resumen.total}</strong></span><span>Presentes <strong>${resumen.presentes}</strong></span><span>Tardanzas <strong>${resumen.tardanzas}</strong></span><span>Leves <strong>${resumen.tardanzasLeves}</strong></span><span>Graves <strong>${resumen.tardanzasGraves}</strong></span><span>Horas extra <strong>${resumen.horasExtras} min</strong></span>`;
 }
@@ -1865,8 +1881,12 @@ function guardarCambioPermanente(event) {
     const nuevoTurno = Number(selects[1]?.value);
     const sedeAnterior = trabajador.sedeId;
     const turnoAnterior = trabajador.turnoId;
-    editarTrabajador(trabajador.id, { sedeId: nuevaSede, turnoId: nuevoTurno || trabajador.turnoId });
-    actualizarColeccion("historial", [...obtenerColeccion("historial"), { id: generarId("historial"), fecha, tipo: "cambio_permanente", trabajadorId: trabajador.id, datoAnterior: { sedeId: sedeAnterior, turnoId: turnoAnterior }, datoNuevo: { sedeId: nuevaSede, turnoId: nuevoTurno || trabajador.turnoId }, usuario: "Administrador" }]);
+    if (!fecha) { alert("Indica desde qué fecha aplica el cambio."); return; }
+    const historial = obtenerColeccion("historial");
+    const cambio = { id: generarId("historial"), fecha, tipo: "cambio_permanente", trabajadorId: trabajador.id, datoAnterior: { sedeId: sedeAnterior, turnoId: turnoAnterior }, datoNuevo: { sedeId: nuevaSede, turnoId: nuevoTurno || trabajador.turnoId }, usuario: "Administrador" };
+    historial.push(cambio);
+    actualizarColeccion("historial", historial);
+    if (fecha <= formatearFechaISO(new Date())) editarTrabajador(trabajador.id, { sedeId: nuevaSede, turnoId: nuevoTurno || trabajador.turnoId });
     cerrarModal();
     renderizarTodo();
 }
@@ -1959,7 +1979,14 @@ function guardarTrabajadorFormulario(event) {
         datos.profesion = "";
         datos.institucionEstudios = "";
     }
-    if (!datos.nombre || !datos.apellido || !datos.dni || !datos.sedeId || !datos.turnoId || (agendaEsAdminGeneral() && !datos.cargos.length)) return;
+    if (!datos.nombre || !datos.apellido || !datos.dni || !datos.sedeId || !datos.turnoId || (agendaEsAdminGeneral() && !datos.cargos.length)) {
+        alert("Completa nombre, apellido, DNI, sede, turno y un cargo válido.");
+        return;
+    }
+    if (trabajadorEditandoId && !agendaEsAdminGeneral()) {
+        const actual = obtenerColeccion("trabajadores").find(item => Number(item.id) === Number(trabajadorEditandoId));
+        if (actual) Object.assign(datos, { ...actual, nombre: datos.nombre, apellido: datos.apellido, dni: datos.dni, telefono: datos.telefono, fechaNacimiento: datos.fechaNacimiento, fechaIngreso: datos.fechaIngreso, estado: datos.estado, sedeId: actual.sedeId, turnoId: actual.turnoId });
+    }
     if (trabajadorEditandoId) editarTrabajador(trabajadorEditandoId, datos); else agregarTrabajador(datos);
     trabajadorEditandoId = null;
     event.target.reset();
@@ -2003,7 +2030,6 @@ function exportarTrabajadoresExcel() {
 }
 
 function abrirFormularioGestion(tipo, id = null) {
-    if (tipo === "sede" || tipo === "turno") return;
     const existente = id ? (tipo === "sede" ? obtenerSede(id) : tipo === "turno" ? obtenerTurno(id) : obtenerColeccion(tipo === "cargo" ? "cargos" : "areas").find(item => Number(item.id) === Number(id))) : null;
     const etiquetas = { sede: "sede", turno: "turno", cargo: "cargo", area: "área" };
     let modal = document.querySelector("#managementFormModal");
@@ -2018,7 +2044,7 @@ function abrirFormularioGestion(tipo, id = null) {
         const datos = Object.fromEntries(new FormData(event.target));
         if (tipo === "sede") existente ? editarSede(id, { ...datos, mesas: Number(datos.mesas || 0) }) : agregarSede(datos.nombre, datos.direccion, { mesas: datos.mesas });
         if (tipo === "turno") existente ? editarTurno(id, { ...datos, toleranciaMinutos: Number(datos.toleranciaMinutos || 0) }) : agregarTurno(datos);
-        if (tipo === "cargo") guardarCatalogo("cargos", existente, id, { nombre: datos.nombre, areaId: Number(datos.areaId) || null });
+        if (tipo === "cargo") guardarCatalogo("cargos", existente, id, { nombre: datos.nombre, areaId: Number(datos.areaId) || null, estado: existente?.estado || "activo" });
         if (tipo === "area") guardarCatalogo("areas", existente, id, { nombre: datos.nombre, estado: "activo" });
         modal.classList.remove("active"); cargarOpcionesTrabajador(); renderizarTodo();
     });

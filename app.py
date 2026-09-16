@@ -56,6 +56,9 @@ DEFAULT_AREAS = {
 	'cocina': ['cocina_caliente', 'cocina_fria'],
 	'sala': ['sala'],
 }
+NOMBRES_DIAS_AGENDA = {
+	0: 'Domingo', 1: 'Lunes', 2: 'Martes', 3: 'Miércoles', 4: 'Jueves', 5: 'Viernes', 6: 'Sábado',
+}
 
 
 def _get_operation_date():
@@ -3030,11 +3033,59 @@ def create_app():
 	def horarios_catalogos():
 		if not current_user.can_view('horarios'):
 			return jsonify({'error': 'forbidden'}), 403
-		turnos = Turno.query.filter(Turno.id_turno != 'NA').order_by(Turno.nombre_turno).all()
+		turnos = Turno.query.filter(Turno.id_turno != 'NA').order_by(Turno.id_turno).all()
+		registro = db.session.get(AgendaPersistencia, 1)
+		persistidos = json.loads(registro.datos_json) if registro and registro.datos_json else {}
+		config_sedes = {str(item.get('id')): item for item in persistidos.get('sedes', []) if isinstance(item, dict)}
+		config_turnos = {str(item.get('id_global', item.get('id'))): item for item in persistidos.get('turnos', []) if isinstance(item, dict)}
+		def turno_id(turno):
+			if turno.id_turno == 'MANANA':
+				return 1
+			if turno.id_turno == 'NOCHE':
+				return 2
+			return 1000 + sum((index + 1) * ord(char) for index, char in enumerate(turno.id_turno)) % 8000
 		return jsonify({
-			'sedes': [{'id': sede.id_sede, 'nombre': sede.nombre_sede, 'estado': 'activo'} for sede in Sede.query.order_by(Sede.nombre_sede).all()],
-			'turnos': [{'id': index + 1, 'id_global': turno.id_turno, 'nombre': turno.nombre_turno, 'horaInicio': '12:00' if turno.id_turno == 'MANANA' else '18:30', 'horaFin': '17:30' if turno.id_turno == 'MANANA' else '00:30', 'toleranciaMinutos': 10, 'estado': 'activo'} for index, turno in enumerate(turnos)],
+			'sedes': [{**{'id': sede.id_sede, 'nombre': sede.nombre_sede, 'estado': 'activo'}, **config_sedes.get(str(sede.id_sede), {})} for sede in Sede.query.order_by(Sede.id_sede).all()],
+			'turnos': [{**config_turnos.get(turno.id_turno, {}), 'id': turno_id(turno), 'id_global': turno.id_turno, 'nombre': turno.nombre_turno, 'horaInicio': config_turnos.get(turno.id_turno, {}).get('horaInicio', '12:00' if turno.id_turno == 'MANANA' else '18:30'), 'horaFin': config_turnos.get(turno.id_turno, {}).get('horaFin', '17:30' if turno.id_turno == 'MANANA' else '00:30'), 'toleranciaMinutos': config_turnos.get(turno.id_turno, {}).get('toleranciaMinutos', 10), 'estado': config_turnos.get(turno.id_turno, {}).get('estado', 'activo')} for turno in turnos],
 		})
+
+	def _validar_datos_agenda(datos):
+		if not isinstance(datos, dict):
+			return False
+		colecciones = ('areas', 'cargos', 'sedes', 'turnos', 'trabajadores', 'permisos', 'excepciones', 'asistencias', 'historial')
+		if any(not isinstance(datos.get(nombre, []), list) for nombre in colecciones):
+			return False
+		if not isinstance(datos.get('configuracion', {}), dict):
+			return False
+		for trabajador in datos.get('trabajadores', []):
+			if not isinstance(trabajador, dict) or not trabajador.get('id') or not str(trabajador.get('dni', '')).strip():
+				return False
+			if not isinstance(trabajador.get('cargos', []), list) or not isinstance(trabajador.get('otrosCargos', []), list):
+				return False
+		return True
+
+	def _filtrar_agenda_por_alcance(datos, user):
+		resultado = dict(datos)
+		if user.rol_nombre == 'admin_general':
+			return resultado
+		excepciones = datos.get('excepciones', []) if isinstance(datos.get('excepciones', []), list) else []
+		def visible(trabajador):
+			if str(trabajador.get('sedeId')) == str(user.id_sede) and str(trabajador.get('turnoId')) in {str(user.id_turno), str({'MANANA': 1, 'NOCHE': 2}.get(user.id_turno))}:
+				return True
+			return any(
+				str(item.get('trabajadorId')) == str(trabajador.get('id'))
+				and item.get('tipo') in {'apoyo', 'cambio_turno'}
+				and str(item.get('sedeId')) == str(user.id_sede)
+				and str(item.get('turnoId')) in {str(user.id_turno), str({'MANANA': 1, 'NOCHE': 2}.get(user.id_turno))}
+				for item in excepciones if isinstance(item, dict)
+			)
+		trabajadores = [item for item in datos.get('trabajadores', []) if isinstance(item, dict) and visible(item)]
+		resultado['trabajadores'] = trabajadores
+		ids = {str(item.get('id')) for item in trabajadores}
+		resultado['permisos'] = [item for item in datos.get('permisos', []) if str(item.get('trabajadorId')) in ids]
+		resultado['excepciones'] = [item for item in excepciones if str(item.get('trabajadorId')) in ids]
+		resultado['asistencias'] = [item for item in datos.get('asistencias', []) if str(item.get('trabajadorId')) in ids]
+		return resultado
 
 	@app.route('/api/horarios/auditoria', methods=['POST'])
 	@login_required
@@ -3053,12 +3104,61 @@ def create_app():
 			return jsonify({'error': 'forbidden'}), 403
 		registro = db.session.get(AgendaPersistencia, 1)
 		if request.method == 'GET':
-			return jsonify({'exists': bool(registro and registro.datos_json and registro.datos_json != '{}'), 'datos': json.loads(registro.datos_json) if registro else None})
+			datos = json.loads(registro.datos_json) if registro and registro.datos_json else None
+			if isinstance(datos, dict) and current_user.rol_nombre != 'admin_general':
+				datos = _filtrar_agenda_por_alcance(datos, current_user)
+			return jsonify({'exists': bool(datos), 'datos': datos})
 		if not current_user.can_write('horarios', 'update'):
 			return jsonify({'error': 'forbidden'}), 403
-		payload = request.get_json(silent=True) or {}
+		payload = request.get_json(silent=True)
 		if not isinstance(payload, dict):
 			return jsonify({'error': 'invalid_payload'}), 400
+		datos_actuales = json.loads(registro.datos_json) if registro and registro.datos_json else {}
+		if not isinstance(datos_actuales, dict):
+			datos_actuales = {}
+		if 'patch' in payload:
+			parche = payload.get('patch')
+			if not isinstance(parche, dict) or len(parche) != 1:
+				return jsonify({'error': 'invalid_patch'}), 400
+			nombre, valor = next(iter(parche.items()))
+			if nombre not in {'areas', 'cargos', 'trabajadores', 'permisos', 'excepciones', 'asistencias', 'historial', 'configuracion'}:
+				return jsonify({'error': 'invalid_collection'}), 400
+			if nombre != 'configuracion' and not isinstance(valor, list):
+				return jsonify({'error': 'invalid_collection_shape', 'collection': nombre}), 400
+			if current_user.rol_nombre != 'admin_general' and nombre in {'areas', 'cargos', 'sedes', 'turnos', 'configuracion'}:
+				return jsonify({'error': 'forbidden_scope'}), 403
+			if current_user.rol_nombre != 'admin_general' and nombre == 'trabajadores':
+				permitidos = _filtrar_agenda_por_alcance({'trabajadores': datos_actuales.get('trabajadores', [])}, current_user).get('trabajadores', [])
+				ids_permitidos = {str(item.get('id')) for item in permitidos}
+				ids_enviados = {str(item.get('id')) for item in valor if isinstance(item, dict)}
+				if not ids_enviados.issubset(ids_permitidos):
+					return jsonify({'error': 'forbidden_scope'}), 403
+				existentes = {str(item.get('id')): item for item in datos_actuales.get('trabajadores', [])}
+				existentes.update({str(item.get('id')): item for item in valor})
+				datos_actuales[nombre] = list(existentes.values())
+			else:
+				datos_actuales[nombre] = valor
+		else:
+			if set(payload) - {'areas', 'cargos', 'sedes', 'turnos', 'trabajadores', 'permisos', 'excepciones', 'asistencias', 'historial', 'configuracion'}:
+				return jsonify({'error': 'invalid_collection'}), 400
+			for nombre, valor in payload.items():
+				if nombre != 'configuracion' and not isinstance(valor, list):
+					return jsonify({'error': 'invalid_collection_shape', 'collection': nombre}), 400
+			if current_user.rol_nombre != 'admin_general':
+				payload = _filtrar_agenda_por_alcance(payload, current_user)
+				if 'trabajadores' in payload:
+					permitidos = {str(item.get('id')): item for item in payload['trabajadores']}
+					trabajadores_actuales = {str(item.get('id')): item for item in datos_actuales.get('trabajadores', [])}
+					trabajadores_actuales.update(permitidos)
+					payload['trabajadores'] = list(trabajadores_actuales.values())
+				payload.pop('sedes', None)
+				payload.pop('turnos', None)
+				datos_actuales.update(payload)
+			else:
+				datos_actuales.update(payload)
+		payload = datos_actuales
+		if not _validar_datos_agenda(payload):
+			return jsonify({'error': 'invalid_agenda_data'}), 400
 		if registro is None:
 			registro = AgendaPersistencia(id_agenda=1)
 			db.session.add(registro)
@@ -3085,9 +3185,12 @@ def create_app():
 		columns = ['Nombre', 'Apellido', 'DNI', 'Telefono', 'Fecha nacimiento', 'Fecha ingreso', 'Direccion', 'Emergencia', 'Grado profesional', 'Profesion', 'Institucion de estudios', 'Area', 'Cargo principal', 'Otros cargos', 'Sede', 'Turno', 'Dia descanso', 'Estado']
 		worksheet.append(columns)
 		for trabajador in trabajadores:
-			fila = [trabajador.get(key, '') for key in ('nombre', 'apellido', 'dni', 'telefono', 'fechaNacimiento', 'fechaIngreso', 'direccion', 'emergenciaNumero', 'gradoProfesional', 'profesion', 'institucionEstudios', 'areaId', 'cargos', 'otrosCargos', 'sedeId', 'turnoId', 'diaDescanso', 'estado')]
-			fila[12] = ';'.join(str(value) for value in fila[12]) if isinstance(fila[12], list) else fila[12]
-			fila[13] = ';'.join(str(value) for value in fila[13]) if isinstance(fila[13], list) else fila[13]
+			areas = {str(item.get('id')): item.get('nombre', '') for item in datos.get('areas', [])}
+			cargos = {str(item.get('id')): item.get('nombre', '') for item in datos.get('cargos', [])}
+			sedes = {str(item.get('id')): item.get('nombre', '') for item in datos.get('sedes', [])}
+			turnos = {str(item.get('id')): item.get('nombre', '') for item in datos.get('turnos', [])}
+			fila = [trabajador.get(key, '') for key in ('nombre', 'apellido', 'dni', 'telefono', 'fechaNacimiento', 'fechaIngreso', 'direccion', 'emergenciaNumero', 'gradoProfesional', 'profesion', 'institucionEstudios')]
+			fila += [areas.get(str(trabajador.get('areaId')), ''), cargos.get(str((trabajador.get('cargos') or [None])[0]), ''), ';'.join(cargos.get(str(value), '') for value in trabajador.get('otrosCargos', []) if cargos.get(str(value))), sedes.get(str(trabajador.get('sedeId')), ''), turnos.get(str(trabajador.get('turnoId')), ''), NOMBRES_DIAS_AGENDA.get(int(trabajador.get('diaDescanso'))) if str(trabajador.get('diaDescanso', '')).isdigit() else '', trabajador.get('estado', 'activo')]
 			worksheet.append(fila)
 		buffer = BytesIO()
 		workbook.save(buffer)
@@ -3138,10 +3241,24 @@ def create_app():
 			headers = [str(value or '').strip().lower() for value in rows[0]]
 			aliases = {'nombre': 'nombre', 'apellido': 'apellido', 'dni': 'dni', 'telefono': 'telefono', 'fecha nacimiento': 'fechaNacimiento', 'fecha ingreso': 'fechaIngreso', 'direccion': 'direccion', 'emergencia': 'emergenciaNumero', 'grado profesional': 'gradoProfesional', 'profesion': 'profesion', 'institucion de estudios': 'institucionEstudios', 'area': 'area', 'cargo principal': 'cargoPrincipal', 'otros cargos': 'otrosCargos', 'sede': 'sede', 'turno': 'turno', 'dia descanso': 'diaDescanso', 'estado': 'estado'}
 			data = []
+			seen_dni = set()
+			def texto_fecha(value):
+				if value in (None, ''):
+					return ''
+				if hasattr(value, 'strftime'):
+					return value.strftime('%Y-%m-%d')
+				return str(value).strip()
 			for row in rows[1:]:
 				values = {aliases[header]: row[index] for index, header in enumerate(headers) if header in aliases and index < len(row)}
 				if not str(values.get('nombre') or '').strip() or not str(values.get('apellido') or '').strip():
 					continue
+				dni = str(values.get('dni') or '').strip()
+				if not dni or dni in seen_dni:
+					continue
+				seen_dni.add(dni)
+				values['dni'] = dni
+				values['fechaNacimiento'] = texto_fecha(values.get('fechaNacimiento'))
+				values['fechaIngreso'] = texto_fecha(values.get('fechaIngreso'))
 				data.append(values)
 			registro = db.session.get(AgendaPersistencia, 1)
 			payload = json.loads(registro.datos_json) if registro and registro.datos_json else {}
@@ -3157,16 +3274,23 @@ def create_app():
 					if value is not None and key not in {'sede', 'turno', 'area', 'cargoPrincipal', 'otrosCargos', 'diaDescanso'}:
 						worker[key] = str(value)
 				worker['estado'] = str(item.get('estado') or worker.get('estado') or 'activo').lower()
-				worker['sedeId'] = next((s.id_sede for s in Sede.query.all() if s.nombre_sede.lower().replace('_', ' ') == str(item.get('sede', '')).lower().replace('_', ' ')), worker.get('sedeId'))
-				worker['turnoId'] = next((index + 1 for index, turno in enumerate(Turno.query.filter(Turno.id_turno != 'NA').order_by(Turno.nombre_turno).all()) if turno.nombre_turno.lower() == str(item.get('turno', '')).lower()), worker.get('turnoId'))
+				sede_nombre = str(item.get('sede', '')).strip().lower().replace('_', ' ')
+				turno_nombre = str(item.get('turno', '')).strip().lower()
+				worker['sedeId'] = next((s.id_sede for s in Sede.query.all() if s.nombre_sede.lower().replace('_', ' ') == sede_nombre), worker.get('sedeId'))
+				turnos_validos = Turno.query.filter(Turno.id_turno != 'NA').all()
+				worker['turnoId'] = next((1 if turno.id_turno == 'MANANA' else 2 if turno.id_turno == 'NOCHE' else 1000 + sum((index + 1) * ord(char) for index, char in enumerate(turno.id_turno)) % 8000 for turno in turnos_validos if turno.nombre_turno.lower() == turno_nombre), worker.get('turnoId'))
 				areas = payload.get('areas', [])
 				cargos = payload.get('cargos', [])
 				area_nombre = str(item.get('area') or '').strip().lower()
 				cargo_principal = str(item.get('cargoPrincipal') or '').strip().lower()
 				otros_nombres = [nombre.strip().lower() for nombre in str(item.get('otrosCargos') or '').split(';') if nombre.strip()]
 				worker['areaId'] = next((area.get('id') for area in areas if str(area.get('nombre', '')).lower() == area_nombre), worker.get('areaId'))
-				worker['cargos'] = [cargo.get('id') for cargo in cargos if str(cargo.get('nombre', '')).lower() == cargo_principal] or worker.get('cargos', [])
+				cargo_principal_id = next((cargo.get('id') for cargo in cargos if str(cargo.get('nombre', '')).lower() == cargo_principal), None)
+				if cargo_principal_id is None:
+					return jsonify({'error': f"Cargo principal no reconocido: {item.get('cargoPrincipal', '')}"}), 400
+				worker['cargos'] = [cargo_principal_id]
 				worker['otrosCargos'] = [cargo.get('id') for cargo in cargos if str(cargo.get('nombre', '')).lower() in otros_nombres]
+				worker['diaDescanso'] = next((day for day, nombre in NOMBRES_DIAS_AGENDA.items() if nombre.lower() == str(item.get('diaDescanso', '')).strip().lower()), worker.get('diaDescanso'))
 			payload['trabajadores'] = workers
 			if registro is None:
 				registro = AgendaPersistencia(id_agenda=1)

@@ -14,7 +14,14 @@ function exportarCSV(nombre, columnas, filas) {
 }
 
 function exportarAsistenciaCSV(fecha = "") {
-    const filas = (fecha ? obtenerAsistenciaDelDia(fecha) : obtenerAsistencias()).map(item => {
+    const sedeId = Number(document.querySelector("#attendanceSedeFilter")?.value || 0);
+    const turnoId = Number(document.querySelector("#attendanceTurnoFilter")?.value || 0);
+    const trabajadores = obtenerTrabajadores().filter(trabajador => {
+        const horario = obtenerHorarioReal(trabajador.id, fecha || formatearFechaISO(new Date()));
+        return (!sedeId || Number(horario?.sedeId) === sedeId) && (!turnoId || Number(horario?.turnoId) === turnoId);
+    });
+    const ids = new Set(trabajadores.map(trabajador => Number(trabajador.id)));
+    const filas = (fecha ? obtenerAsistenciaDelDia(fecha) : obtenerAsistencias()).filter(item => ids.has(Number(item.trabajadorId))).map(item => {
         const trabajador = obtenerTrabajador(item.trabajadorId);
         return [fecha || item.fecha, nombreCompleto(trabajador || { nombre: "", apellido: "" }), item.horaEntrada, item.horaSalida, item.estado || item.clasificacion?.estado, item.tardanza, item.horasTrabajadas, item.horasExtras];
     });

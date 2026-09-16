@@ -755,7 +755,7 @@ function renderizarSemana() {
 
                         <strong>
 
-                            <button class="worker-name-button" type="button" onclick="abrirPerfilTrabajador(${trabajador.id})">${nombreCompleto(trabajador)}</button>
+                            <button class="worker-name-button" type="button" onclick="abrirPerfilTrabajador(${trabajador.id})">${escaparHTML(nombreCompleto(trabajador))}</button>
 
                         </strong>
 

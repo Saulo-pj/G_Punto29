@@ -6,6 +6,8 @@ const STORAGE_KEY = "organizador_horarios_data";
 const REMOTE_WORKERS_CLEANUP_KEY = "horarios_remote_workers_cleaned_v1";
 let catalogosHorarios = { sedes: [], turnos: [] };
 let agendaPersistenciaLista = false;
+let sincronizacionReintento = null;
+let sincronizacionPendiente = null;
 
 async function cargarCatalogosHorarios() {
     const respuesta = await fetch("/api/horarios/catalogos", { credentials: "same-origin" });
@@ -25,8 +27,8 @@ async function sincronizarAgendaConServidor() {
     const remoto = await respuesta.json();
     if (remoto.exists && remoto.datos) {
         const datosRemotos = normalizarDatos(remoto.datos);
-        datosRemotos.sedes = catalogosHorarios.sedes;
-        datosRemotos.turnos = catalogosHorarios.turnos;
+        datosRemotos.sedes = datosRemotos.sedes.length ? datosRemotos.sedes : catalogosHorarios.sedes;
+        datosRemotos.turnos = datosRemotos.turnos.length ? datosRemotos.turnos : catalogosHorarios.turnos;
         localStorage.setItem(STORAGE_KEY, JSON.stringify(datosRemotos));
         agendaPersistenciaLista = true;
         return;
@@ -50,11 +52,60 @@ async function sincronizarAgendaConServidor() {
     agendaPersistenciaLista = true;
 }
 
-let sincronizacionPendiente = null;
 function programarSincronizacionAgenda() {
-    if (!agendaPersistenciaLista) return;
     clearTimeout(sincronizacionPendiente);
-    sincronizacionPendiente = setTimeout(() => fetch("/api/horarios/datos", { method: "PUT", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify(obtenerDatos()) }).catch(() => undefined), 250);
+    sincronizacionPendiente = setTimeout(async () => {
+        try {
+            const respuesta = await fetch("/api/horarios/datos", { method: "PUT", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ patch: window.__agendaUltimoParche }) });
+            if (!respuesta.ok) throw new Error(`Sincronizacion rechazada (${respuesta.status})`);
+            agendaPersistenciaLista = true;
+        } catch (error) {
+            console.error(error);
+            clearTimeout(sincronizacionReintento);
+            sincronizacionReintento = setTimeout(programarSincronizacionAgenda, 1500);
+            if (typeof mostrarToast === "function") mostrarToast("No se pudo sincronizar. Se reintentara automaticamente.", "error");
+        }
+    }, 250);
+}
+
+function agregarSede(nombre, direccion = "", extras = {}) {
+    if (!agendaEsAdminGeneral()) return false;
+    const sedes = obtenerSedes();
+    sedes.push({ id: generarId("sedes"), nombre: nombre.trim(), direccion: direccion.trim(), mesas: Number(extras.mesas || 0), minimosPorArea: {}, estado: "activo" });
+    actualizarColeccion("sedes", sedes);
+    catalogosHorarios.sedes = sedes;
+    return true;
+}
+
+function editarSede(id, cambios) {
+    if (!agendaEsAdminGeneral()) return false;
+    const sedes = obtenerSedes();
+    const sede = sedes.find(item => Number(item.id) === Number(id));
+    if (!sede) return false;
+    Object.assign(sede, cambios);
+    actualizarColeccion("sedes", sedes);
+    catalogosHorarios.sedes = sedes;
+    return true;
+}
+
+function agregarTurno(datos) {
+    if (!agendaEsAdminGeneral()) return false;
+    const turnos = obtenerTurnos();
+    turnos.push({ id: generarId("turnos"), ...datos, toleranciaMinutos: Number(datos.toleranciaMinutos || 10), estado: "activo" });
+    actualizarColeccion("turnos", turnos);
+    catalogosHorarios.turnos = turnos;
+    return true;
+}
+
+function editarTurno(id, cambios) {
+    if (!agendaEsAdminGeneral()) return false;
+    const turnos = obtenerTurnos();
+    const turno = turnos.find(item => Number(item.id) === Number(id));
+    if (!turno) return false;
+    Object.assign(turno, cambios);
+    actualizarColeccion("turnos", turnos);
+    catalogosHorarios.turnos = turnos;
+    return true;
 }
 
 function obtenerSedes() { return catalogosHorarios.sedes.length ? catalogosHorarios.sedes : obtenerColeccion("sedes"); }
@@ -200,6 +251,7 @@ function actualizarColeccion(nombre, datos) {
     sistema[nombre] = datos;
 
     guardarDatos(sistema);
+    window.__agendaUltimoParche = { [nombre]: datos };
     programarSincronizacionAgenda();
     if (typeof renderizarDashboard === "function") renderizarDashboard();
 
