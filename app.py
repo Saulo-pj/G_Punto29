@@ -220,7 +220,7 @@ def _stats_for_user(user):
 
 def _home_alerts_for_user(user, selected_date):
 	try:
-		date_str = selected_date.strftime('%Y-%m-%d') if selected_date else datetime.utcnow().strftime('%Y-%m-%d')
+		target_date = selected_date or datetime.utcnow().date()
 		alerts = {
 			'stock_critico_count': 0,
 			'pedidos_pendientes_count': 0,
@@ -239,7 +239,7 @@ def _home_alerts_for_user(user, selected_date):
 
 		if user and user.can_view('pedidos'):
 			pedidos_query = ChecklistPedido.query.filter(
-				db.func.date(ChecklistPedido.fecha) == date_str,
+				db.func.date(ChecklistPedido.fecha) == target_date,
 				ChecklistPedido.estado_general == 'Pendiente',
 			)
 			if user.rol_nombre not in {'admin_general', 'admin_almacen', 'personal_prod'}:
@@ -260,7 +260,7 @@ def _home_alerts_for_user(user, selected_date):
 		if role_name == 'admin_general':
 			alerts['subtitle'] = 'Vision global: pendientes de todo el equipo.'
 			checklists_pendientes = ChecklistPedido.query.filter(
-				db.func.date(ChecklistPedido.fecha) == date_str,
+				db.func.date(ChecklistPedido.fecha) == target_date,
 				ChecklistPedido.estado_general.in_(['Borrador', 'Pendiente']),
 			).count()
 			admin_sala_scopes = db.session.query(Usuario.id_sede, Usuario.id_turno).join(
@@ -319,7 +319,7 @@ def _home_alerts_for_user(user, selected_date):
 			alerts['subtitle'] = 'Seguimiento de tu lista de pedidos de produccion.'
 			my_pedido = ChecklistPedido.query.filter(
 				ChecklistPedido.id_usuario == user.id_usuario,
-				db.func.date(ChecklistPedido.fecha) == date_str,
+				db.func.date(ChecklistPedido.fecha) == target_date,
 			).order_by(ChecklistPedido.id_pedido.desc()).first()
 			created = my_pedido is not None
 			sent = bool(my_pedido and my_pedido.estado_general in {'Enviado', 'Finalizado'})
@@ -380,8 +380,8 @@ def _inventory_dashboard_metrics(user, selected_date):
 		Producto.id_producto == MovimientoInventario.id_producto,
 	).filter(
 		db.func.upper(MovimientoInventario.tipo) == 'SALIDA',
-		db.func.date(MovimientoInventario.fecha) >= period_start.strftime('%Y-%m-%d'),
-		db.func.date(MovimientoInventario.fecha) <= selected_date.strftime('%Y-%m-%d'),
+		db.func.date(MovimientoInventario.fecha) >= period_start,
+		db.func.date(MovimientoInventario.fecha) <= selected_date,
 	)
 	if user.rol_nombre != 'admin_general':
 		salidas_query = salidas_query.filter(MovimientoInventario.id_sede == user.id_sede)
@@ -868,7 +868,7 @@ def _checklist_base_query(user, selected_date=None):
 		ChecklistPedido.id_turno == user.id_turno,
 	)
 	if selected_date is not None:
-		query = query.filter(db.func.date(ChecklistPedido.fecha) == selected_date.strftime('%Y-%m-%d'))
+		query = query.filter(db.func.date(ChecklistPedido.fecha) == selected_date)
 	return query
 
 
@@ -1215,7 +1215,7 @@ def _sync_open_checklists_with_template(user, selected_date):
 	open_checklists = ChecklistPedido.query.filter(
 		ChecklistPedido.id_sede == user.id_sede,
 		ChecklistPedido.id_turno == user.id_turno,
-		db.func.date(ChecklistPedido.fecha) >= selected_date.strftime('%Y-%m-%d'),
+		db.func.date(ChecklistPedido.fecha) >= selected_date,
 		ChecklistPedido.estado_general.in_(['Borrador', 'Pendiente']),
 	).order_by(ChecklistPedido.fecha.asc(), ChecklistPedido.id_pedido.asc()).all()
 
@@ -2616,7 +2616,7 @@ def create_app():
 			).outerjoin(
 				Usuario, Usuario.id_usuario == ChecklistPedido.id_usuario
 			).filter(
-				db.func.date(ChecklistPedido.fecha) == selected_date.strftime('%Y-%m-%d')
+				db.func.date(ChecklistPedido.fecha) == selected_date
 			).order_by(ChecklistPedido.id_pedido.desc()).limit(200).all()
 
 			turno_map = {}

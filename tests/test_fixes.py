@@ -1,9 +1,12 @@
 import os
 import json
+import re
 import unittest
 import subprocess
 from datetime import date
+from pathlib import Path
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.dialects import postgresql
 
 
 class TestJsSyntax(unittest.TestCase):
@@ -21,6 +24,55 @@ class TestJsSyntax(unittest.TestCase):
                     if res.returncode != 0:
                         failed.append(f"{path}:\n{res.stderr.strip()}")
         self.assertEqual(failed, [], "Archivos JS con error de sintaxis:\n" + "\n---\n".join(failed))
+
+
+class TestDateFiltersUseDateObjects(unittest.TestCase):
+    """Evita comparaciones date = varchar en filtros SQLAlchemy."""
+
+    @classmethod
+    def setUpClass(cls):
+        os.environ.setdefault('SECRET_KEY', 'test_secret_key_for_unit_testing_12345')
+        from app import create_app, db as _db
+        cls.app = create_app()
+        cls.app.config['TESTING'] = True
+        cls.app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
+        cls.db = _db
+        with cls.app.app_context():
+            _db.create_all()
+
+    def test_checklist_base_query_binds_postgres_date_param(self):
+        from app import _checklist_base_query
+        from database import Usuario
+
+        with self.app.app_context():
+            user = Usuario(id_usuario='u-date', username='u-date', password_hash='x', id_sede=1, id_turno='T1')
+            selected_date = date(2026, 10, 8)
+            query = _checklist_base_query(user, selected_date)
+            compiled = query.statement.compile(dialect=postgresql.dialect())
+            date_params = [value for value in compiled.params.values() if isinstance(value, date)]
+            self.assertIn(selected_date, date_params)
+
+    def test_inventory_date_range_binds_postgres_date_params(self):
+        from app import db
+        from database import MovimientoInventario
+
+        selected_date = date(2026, 10, 8)
+        period_start = date(2026, 9, 9)
+        with self.app.app_context():
+            query = db.session.query(MovimientoInventario.id_movimiento).filter(
+                db.func.date(MovimientoInventario.fecha) >= period_start,
+                db.func.date(MovimientoInventario.fecha) <= selected_date,
+            )
+            compiled = query.statement.compile(dialect=postgresql.dialect())
+            date_params = [value for value in compiled.params.values() if isinstance(value, date)]
+            self.assertIn(period_start, date_params)
+            self.assertIn(selected_date, date_params)
+
+    def test_no_strftime_in_date_comparisons(self):
+        app_source = Path(__file__).resolve().parents[1] / 'app.py'
+        content = app_source.read_text(encoding='utf-8')
+        forbidden = re.compile(r"db\.func\.date\([^)]*\)\s*(?:==|>=|<=|>|<)\s*[^,\n]*strftime\('%Y-%m-%d'\)")
+        self.assertIsNone(forbidden.search(content))
 
 
 class TestArqueoFixes(unittest.TestCase):
