@@ -13,6 +13,14 @@
 ## Arranque
 - El proyecto usa `Procfile` con:
   - `web: gunicorn app:app`
+- PostgreSQL usa `psycopg[binary]` (version 3). La app normaliza los prefijos
+  `postgres://`, `postgresql://` y `postgresql+psycopg2://` a `postgresql+psycopg://`,
+  conservando usuario, clave, servidor y parametros.
+- `railway.json` configura `/health`: comprueba que la app y la base respondan
+  antes de considerar saludable un despliegue.
+- Si aparece `ModuleNotFoundError: No module named 'psycopg'`, comprobar que
+  Railway construya el ultimo commit de `main`; repetir el despliegue de una
+  version anterior puede reutilizar dependencias que no incluyen ese controlador.
 
 ## Comportamiento al iniciar
 - La app crea las tablas si la base esta vacia.

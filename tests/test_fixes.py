@@ -74,6 +74,33 @@ class TestDateFiltersUseDateObjects(unittest.TestCase):
         forbidden = re.compile(r"db\.func\.date\([^)]*\)\s*(?:==|>=|<=|>|<)\s*[^,\n]*strftime\('%Y-%m-%d'\)")
         self.assertIsNone(forbidden.search(content))
 
+    def test_movimientos_filters_bind_dates_and_handle_invalid_input(self):
+        from sqlalchemy import event
+        from sqlalchemy.orm import Session
+        seen_dates = []
+
+        def inspect_query(state):
+            if state.is_select:
+                compiled = state.statement.compile(dialect=postgresql.dialect())
+                seen_dates.extend(v for v in compiled.params.values() if isinstance(v, date))
+
+        client = self.app.test_client()
+        with client.session_transaction() as session:
+            session['_user_id'] = 'admin'
+            session['_fresh'] = True
+        event.listen(Session, 'do_orm_execute', inspect_query)
+        try:
+            response = client.get('/movimientos?fecha_desde=2026-10-01&fecha_hasta=2026-10-12')
+            self.assertEqual(response.status_code, 200)
+            self.assertIn(date(2026, 10, 1), seen_dates)
+            self.assertIn(date(2026, 10, 12), seen_dates)
+            response = client.get('/movimientos?fecha_desde=incorrecta&fecha_hasta=2026-99-99')
+            self.assertEqual(response.status_code, 200)
+            self.assertIn(b'Fecha inicial invalida', response.data)
+            self.assertIn(b'Fecha final invalida', response.data)
+        finally:
+            event.remove(Session, 'do_orm_execute', inspect_query)
+
 
 class TestArqueoFixes(unittest.TestCase):
     """Pruebas de lógica de Arqueo de Caja."""

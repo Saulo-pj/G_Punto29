@@ -12,6 +12,7 @@ from collections import defaultdict
 from flask import Flask, flash, jsonify, redirect, render_template, request, send_file, send_from_directory, url_for, session
 from flask_login import LoginManager, current_user, login_required, login_user, logout_user
 from dotenv import load_dotenv
+from database_config import database_uri
 from sqlalchemy import or_
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import IntegrityError
@@ -1460,10 +1461,8 @@ def _rename_usuario_id(usuario, new_id):
 def create_app():
 	app = Flask(__name__)
 
-	# Render puede entregar postgres://; SQLAlchemy espera postgresql://
-	database_url = os.environ.get('DATABASE_URL')
-	if database_url and database_url.startswith('postgres://'):
-		database_url = database_url.replace('postgres://', 'postgresql://', 1)
+	# Usar psycopg 3, declarado en requirements.txt, para PostgreSQL.
+	database_url = database_uri(os.environ.get('DATABASE_URL'))
 
 	# Fallback local para desarrollo cuando no existe DATABASE_URL
 	app.config['SQLALCHEMY_DATABASE_URI'] = database_url or 'sqlite:///mi_app.db'
@@ -1533,6 +1532,15 @@ def create_app():
 		_ensure_inventory_schema(app)
 		_seed_catalogs()
 		print('Base de datos vinculada y tablas creadas.')
+
+	@app.get('/health')
+	def health():
+		try:
+			db.session.execute(text('SELECT 1'))
+			return jsonify({'ok': True})
+		except Exception:
+			db.session.rollback()
+			return jsonify({'ok': False}), 503
 
 	@app.route('/')
 	def index():
@@ -2262,9 +2270,15 @@ def create_app():
 			movs_query = movs_query.filter(MovimientoInventario.id_sede == current_user.id_sede)
 
 		if fecha_desde:
-			movs_query = movs_query.filter(db.func.date(MovimientoInventario.fecha) >= fecha_desde)
+			try:
+				movs_query = movs_query.filter(db.func.date(MovimientoInventario.fecha) >= date.fromisoformat(fecha_desde))
+			except ValueError:
+				flash('Fecha inicial invalida. Usa el formato AAAA-MM-DD.', 'error')
 		if fecha_hasta:
-			movs_query = movs_query.filter(db.func.date(MovimientoInventario.fecha) <= fecha_hasta)
+			try:
+				movs_query = movs_query.filter(db.func.date(MovimientoInventario.fecha) <= date.fromisoformat(fecha_hasta))
+			except ValueError:
+				flash('Fecha final invalida. Usa el formato AAAA-MM-DD.', 'error')
 		if tipo:
 			movs_query = movs_query.filter(MovimientoInventario.tipo == tipo)
 		if categoria:
