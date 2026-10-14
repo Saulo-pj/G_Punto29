@@ -26,8 +26,8 @@ async function submitFormAsync(form, formData) {
 		credentials: 'same-origin',
 	});
 
-	if (!response.ok) {
-		throw new Error('No se pudo guardar el formulario.');
+	if (!response.ok || response.redirected || response.status !== 204) {
+		throw new Error('No se pudo confirmar el guardado. Recarga la pagina para comprobar la cantidad antes de volver a intentarlo.');
 	}
 }
 
@@ -123,10 +123,6 @@ function bindChecklistAsyncForms() {
 
 	for (const form of asyncForms) {
 		form.addEventListener('submit', async (event) => {
-			if (form.dataset.forceSyncSubmit === '1') {
-				delete form.dataset.forceSyncSubmit;
-				return;
-			}
 			if ((form.method || 'POST').toUpperCase() !== 'POST') {
 				return;
 			}
@@ -138,7 +134,9 @@ function bindChecklistAsyncForms() {
 			}
 			let rollback = null;
 			let postSuccess = null;
-			let shouldFallbackSyncSubmit = false;
+			let saveFailed = false;
+			const previousError = form.parentElement.querySelector('[data-checklist-save-error]');
+			if (previousError) previousError.remove();
 
 			if (form.classList.contains('qty-counter-form')) {
 				const action = formData.get('action') || '';
@@ -217,18 +215,17 @@ function bindChecklistAsyncForms() {
 				if (rollback) {
 					rollback();
 				}
-				shouldFallbackSyncSubmit = true;
+				saveFailed = true;
+				const message = document.createElement('p');
+				message.setAttribute('data-checklist-save-error', '');
+				message.setAttribute('role', 'alert');
+				message.textContent = error.message || 'No se pudo confirmar el guardado. Recarga la pagina.';
+				form.insertAdjacentElement('afterend', message);
 			} finally {
 				setFormBusy(form, false);
 			}
 
-			if (shouldFallbackSyncSubmit) {
-				form.dataset.forceSyncSubmit = '1';
-				if (typeof form.requestSubmit === 'function') {
-					form.requestSubmit(event.submitter || undefined);
-				} else {
-					form.submit();
-				}
+			if (saveFailed) {
 				return;
 			}
 

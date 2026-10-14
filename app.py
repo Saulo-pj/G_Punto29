@@ -9,7 +9,7 @@ from io import BytesIO
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from collections import defaultdict
-from flask import Flask, flash, jsonify, redirect, render_template, request, send_file, send_from_directory, url_for, session
+from flask import Flask, abort, flash, jsonify, redirect, render_template, request, send_file, send_from_directory, url_for, session
 from flask_login import LoginManager, current_user, login_required, login_user, logout_user
 from dotenv import load_dotenv
 from database_config import database_uri
@@ -194,6 +194,17 @@ def load_user(user_id):
 def _forbidden_redirect():
 	flash('No tienes permisos para entrar a esta vista.', 'error')
 	return redirect(url_for('dashboard'))
+
+
+def _form_record_id(name, default=None):
+	"""Validate integer primary keys before binding form text to PostgreSQL."""
+	value = str(request.form.get(name, default) or '').strip()
+	if not re.fullmatch(r'[0-9]{1,10}', value):
+		abort(400, description='Identificador invalido. Recarga la pagina e intenta nuevamente.')
+	identifier = int(value)
+	if not 0 < identifier <= 2147483647:
+		abort(400, description='Identificador fuera de rango.')
+	return identifier
 
 
 def _safe_json_list(value):
@@ -1723,7 +1734,7 @@ def create_app():
 
 			action = request.form.get('action', 'update_row')
 			id_producto = request.form.get('id_producto', '').strip()
-			target_sede = current_user.id_sede if current_user.rol_nombre != 'admin_general' else int(request.form.get('id_sede', current_user.id_sede))
+			target_sede = current_user.id_sede if current_user.rol_nombre != 'admin_general' else _form_record_id('id_sede', current_user.id_sede)
 
 			if action == 'upsert_product':
 				if not id_producto:
@@ -2377,7 +2388,7 @@ def create_app():
 			if action == 'mark_sent':
 				if not can_update:
 					return _forbidden_redirect()
-				pedido = ChecklistPedido.query.get(request.form.get('id_pedido'))
+				pedido = db.session.get(ChecklistPedido, _form_record_id('id_pedido'))
 				if pedido and pedido.estado_general in {'Pendiente', 'Borrador'}:
 					total = DetallePedido.query.filter(
 						DetallePedido.id_pedido == pedido.id_pedido,
@@ -2395,7 +2406,7 @@ def create_app():
 			elif action == 'save_dispatch_line':
 				if not can_update:
 					return _forbidden_redirect()
-				detalle = DetallePedido.query.get(request.form.get('id_detalle'))
+				detalle = db.session.get(DetallePedido, _form_record_id('id_detalle'))
 				if not detalle:
 					flash('Linea no encontrada.', 'error')
 					return _pedidos_post_response(request.form.get('pedido_id'))
@@ -2432,7 +2443,7 @@ def create_app():
 			elif action == 'delete_requested_order':
 				if not can_delete_requested:
 					return _forbidden_redirect()
-				pedido = ChecklistPedido.query.get(request.form.get('id_pedido'))
+				pedido = db.session.get(ChecklistPedido, _form_record_id('id_pedido'))
 				if not pedido:
 					flash('Pedido no encontrado.', 'error')
 					return _pedidos_post_response(pedido_id)
@@ -2771,7 +2782,7 @@ def create_app():
 
 			def _get_target_detail():
 				detail_query = DetallePedido.query.filter_by(
-					id_detalle=request.form.get('id_detalle', '').strip(),
+					id_detalle=_form_record_id('id_detalle'),
 					id_pedido=active_checklist.id_pedido if active_checklist else None,
 				)
 				if is_admin_general and selected_filter_user:
