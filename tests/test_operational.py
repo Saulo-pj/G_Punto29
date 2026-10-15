@@ -182,3 +182,22 @@ class OperationalRegression(unittest.TestCase):
         self.assertEqual(statements,[])
         self.assertIn('public', response.headers['Cache-Control'])
         response.close()
+
+    def test_movimientos_with_existing_rows_for_every_authorized_role(self):
+        from database import MovimientoInventario
+        with self.app.app_context():
+            db.session.add_all([
+                Rol(id_rol=4,nombre_rol='personal_prod'),
+                Usuario(id_usuario='production',username='production',password_hash='x',id_rol=4,id_sede=1,id_turno='NA'),
+                MovimientoInventario(id_sede=1,id_producto='P1',id_usuario='warehouse',cantidad=1,tipo='ENTRADA',motivo='Prueba de acceso',fecha=datetime(2026,10,15,17,30)),
+                MovimientoInventario(id_sede=2,id_producto='P1',id_usuario='chef',cantidad=1,tipo='ENTRADA',motivo='Otra sede',fecha=datetime(2026,10,15,17,30)),
+            ])
+            db.session.commit()
+        for owner in ('general','warehouse','production'):
+            with self.subTest(role=owner):
+                response=self.client(owner).get('/movimientos')
+                self.assertEqual(response.status_code,200)
+                text=response.get_data(as_text=True)
+                self.assertIn('15/10/2026 12:30',text)
+                self.assertIn('Prueba de acceso',text)
+                if owner != 'general': self.assertNotIn('Otra sede',text)

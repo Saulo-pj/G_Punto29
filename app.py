@@ -1536,6 +1536,8 @@ def _rename_usuario_id(usuario, new_id):
 
 def create_app():
 	app = Flask(__name__)
+	with open(os.path.join(app.root_path, 'VERSION'), encoding='utf-8') as version_file:
+		app.jinja_env.globals['app_version'] = version_file.read().strip()
 
 	# Usar psycopg 3, declarado en requirements.txt, para PostgreSQL.
 	database_url = database_uri(os.environ.get('DATABASE_URL'))

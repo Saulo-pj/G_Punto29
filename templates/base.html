@@ -72,7 +72,10 @@
                     {% endif %}
                 {% endfor %}
             </nav>
-            <a class="logout" href="{{ url_for('logout') }}">Cerrar sesion</a>
+            <footer class="sidebar-footer">
+                <a class="logout" href="{{ url_for('logout') }}">Cerrar sesion</a>
+                <small class="app-version" aria-label="Versión del sistema">Versión {{ app_version }}</small>
+            </footer>
         </aside>
         <button id="mobile-menu-btn" class="mobile-menu-btn" type="button" aria-label="Abrir menu">
             <span></span><span></span><span></span>
