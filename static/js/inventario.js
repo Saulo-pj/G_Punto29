@@ -9,6 +9,7 @@ document.addEventListener('click', (event) => {
 	if (!target) {
 		return;
 	}
+	if (target.classList.contains('inventory-edit-row')) hydrateInventoryRow(target);
 
 	target.classList.toggle('is-hidden');
 	if (target.id === 'inventory-create-panel') {
@@ -87,15 +88,37 @@ function buildSubareaOptions(areaSelect, subareaSelect) {
 	}
 }
 
-function wireAreaSubareaSelectors() {
-	const areaSelects = document.querySelectorAll('.area-select');
+function hydrateInventoryRow(row) {
+	if (row.dataset.hydrated) return;
+	const catalogs = window.INVENTORY_CATALOG || {};
+	for (const select of row.querySelectorAll('[data-catalog]')) {
+		const values = [...(catalogs[select.dataset.catalog] || [])];
+		const current = select.dataset.current || '';
+		if (current && !values.includes(current)) values.unshift(current);
+		for (const value of values) {
+			const option = document.createElement('option');
+			option.value = value; option.textContent = value;
+			select.appendChild(option);
+		}
+		if (current) select.value = current;
+	}
+	row.dataset.hydrated = '1';
+	wireAreaSubareaSelectors(row);
+}
+
+function wireAreaSubareaSelectors(root = document) {
+	const areaSelects = root.querySelectorAll('.area-select');
 	for (const areaSelect of areaSelects) {
+		const editRow = areaSelect.closest('.inventory-edit-row');
+		if (editRow && !editRow.dataset.hydrated) continue;
+		if (areaSelect.dataset.wired) continue;
 		const targetId = areaSelect.dataset.subareaTarget;
 		const subareaSelect = targetId ? document.getElementById(targetId) : null;
 		if (!subareaSelect) {
 			continue;
 		}
 		buildSubareaOptions(areaSelect, subareaSelect);
+		areaSelect.dataset.wired = '1';
 		areaSelect.addEventListener('change', () => buildSubareaOptions(areaSelect, subareaSelect));
 	}
 }

@@ -1,4 +1,4 @@
-const VERSION = 'p29-v6';
+const VERSION = 'p29-v7';
 const STATIC = `${VERSION}-static`;
 const owners = new Map();
 const CORE = ['/static/css/style.css', '/static/css/operational.css', '/static/js/local-first.js', '/static/js/inventario.js', '/static/js/checklist.js', '/static/js/pedidos.js', '/static/img/icono.png', '/static/img/logo.png'];
@@ -12,9 +12,10 @@ self.addEventListener('message', event => {
     const url = new URL(event.source.url);
     if (['/checklist','/pedidos','/arqueo'].includes(url.pathname)) event.waitUntil((async () => {
       try {
+        const cache = await caches.open(`${VERSION}-user-${encodeURIComponent(owner)}`);
+        if (await cache.match(url.href)) return;
         const response = await fetch(url.href);
         if (response.ok && !response.redirected && response.headers.get('X-App-User') === owner) {
-          const cache = await caches.open(`${VERSION}-user-${encodeURIComponent(owner)}`);
           await cache.put(url.href, response);
         }
       } catch (_) {}
@@ -62,7 +63,8 @@ self.addEventListener('fetch', event => {
   }
   if (url.pathname.startsWith('/static/')) event.respondWith((async () => {
     const cache = await caches.open(STATIC);
+    if (url.searchParams.has('v')) { const cached = await cache.match(request); if (cached) return cached; }
     try { const response = await fetch(request); if (response.ok) await cache.put(request, response.clone()); return response; }
-    catch (_) { return (await cache.match(request)) || Response.error(); }
+    catch (_) { return (await cache.match(request, { ignoreSearch: true })) || Response.error(); }
   })());
 });

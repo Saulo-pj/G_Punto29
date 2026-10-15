@@ -127,22 +127,10 @@
 					<div class="edit-grid">
 						{% if not can_manage_catalog %}<p class="muted">Edita el stock y punto mínimo de tu sede. El catálogo se administra en Almacén.</p>{% endif %}
 						<input type="text" name="nombre_producto" value="{{ prod.nombre_producto }}" placeholder="Nombre producto" required {% if not can_manage_catalog %}readonly{% endif %}>
-						<select name="id_area" required {% if not can_manage_catalog %}disabled{% endif %}>
-							{% for c in categorias %}
-							<option value="{{ c.nombre_categoria }}" {% if c.nombre_categoria == prod.id_area %}selected{% endif %}>{{ c.nombre_categoria }}</option>
-							{% endfor %}
-						</select>
-						<select name="area" class="area-select" data-subarea-target="edit-subarea-{{ prod.id_producto|replace(' ', '_') }}" required {% if not can_manage_catalog %}disabled{% endif %}>
-							{% for a in areas %}
-							<option value="{{ a.nombre_area }}" {% if prod.area == a.nombre_area %}selected{% endif %}>{{ a.nombre_area|title }}</option>
-							{% endfor %}
-						</select>
+						<select name="id_area" required {% if not can_manage_catalog %}disabled{% endif %} data-catalog="categories" data-current="{{ prod.id_area or '' }}"></select>
+						<select name="area" class="area-select" data-subarea-target="edit-subarea-{{ prod.id_producto|replace(' ', '_') }}" required {% if not can_manage_catalog %}disabled{% endif %} data-catalog="areas" data-current="{{ prod.area or '' }}"></select>
 						<select id="edit-subarea-{{ prod.id_producto|replace(' ', '_') }}" name="subarea" class="subarea-select" data-current="{{ prod.subarea or '' }}" {% if not can_manage_catalog %}disabled{% endif %}></select>
-						<select name="unidad" required {% if not can_manage_catalog %}disabled{% endif %}>
-							{% for u in unidades %}
-							<option value="{{ u.nombre_unidad }}" {% if u.nombre_unidad == prod.unidad %}selected{% endif %}>{{ u.nombre_unidad }}</option>
-							{% endfor %}
-						</select>
+						<select name="unidad" required {% if not can_manage_catalog %}disabled{% endif %} data-catalog="units" data-current="{{ prod.unidad or '' }}"></select>
 						<input type="number" step="0.01" min="0" name="costo_unitario" value="{{ prod.costo_unitario or 0 }}" placeholder="Costo unitario" {% if not can_manage_catalog %}readonly{% endif %}>
 						<input type="number" step="0.01" name="punto_minimo" value="{{ inv.punto_minimo if inv else 0 }}" placeholder="Punto minimo">
 						<input type="number" step="0.01" name="stock_actual" value="{{ inv.stock_actual if inv else 0 }}" placeholder="Stock central">
@@ -351,4 +339,11 @@
 	<p class="muted">Para editar un producto existente, vuelve a guardar usando su mismo ID de producto.</p>
 </div>
 {% endif %}
+<script>
+window.INVENTORY_CATALOG = {
+  categories: {{ categorias|map(attribute='nombre_categoria')|list|tojson }},
+  units: {{ unidades|map(attribute='nombre_unidad')|list|tojson }},
+  areas: {{ areas|map(attribute='nombre_area')|list|tojson }}
+};
+</script>
 {% endblock %}

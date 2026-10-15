@@ -63,6 +63,17 @@ function getCurrentQtyFromCounterForm(form) {
 function updateQtyVisualInCounterForm(form, qty) {
 	const safeQty = Math.max(qty, 0);
 	const qtyText = formatQty(safeQty);
+	const detailId = form.querySelector('[name="id_detalle"]')?.value;
+	if (detailId) {
+		document.querySelectorAll('[data-view-detail]').forEach(row => {
+			if (row.dataset.viewDetail !== detailId) return;
+			row.hidden = safeQty <= 0;
+			const meta = row.querySelector('.check-item-meta');
+			if (meta) meta.textContent = meta.textContent.replace(/pedido:\s*[-\d.,]+/i, 'pedido: ' + qtyText);
+		});
+		const sendButton = document.querySelector('.send-wrap button');
+		if (sendButton && !sendButton.dataset.queued) sendButton.disabled = ![...document.querySelectorAll('[data-view-detail]')].some(row => !row.hidden);
+	}
 	const qtyButton = form.querySelector('.qty-value-btn');
 	if (qtyButton) {
 		qtyButton.textContent = qtyText;
@@ -179,6 +190,7 @@ function bindChecklistAsyncForms() {
 			}
 
 			if (form.classList.contains('quick-add-form')) {
+				window.CHECKLIST_MEMBERSHIP_DIRTY = true;
 				const actionInput = form.querySelector('input[name="action"]');
 				const button = form.querySelector('button[type="submit"]');
 				if (actionInput && button) {
@@ -194,6 +206,11 @@ function bindChecklistAsyncForms() {
 							button.textContent = '+';
 						}
 					};
+					if (window.LocalFirst) {
+						const previousClass = button.className, previousText = button.textContent, previousAction = actionInput.value;
+						postSuccess(); postSuccess = null;
+						rollback = () => { button.className = previousClass; button.textContent = previousText; actionInput.value = previousAction; };
+					}
 				}
 			}
 
@@ -215,7 +232,8 @@ function bindChecklistAsyncForms() {
 				}
 			}
 
-			setFormBusy(form, true);
+			const localTap = window.LocalFirst && form.classList.contains('qty-counter-form');
+			if (!localTap) setFormBusy(form, true);
 			try {
 				await submitFormAsync(form, formData);
 			} catch (error) {
@@ -229,7 +247,7 @@ function bindChecklistAsyncForms() {
 				message.textContent = error.message || 'No se pudo confirmar el guardado. Recarga la pagina.';
 				form.insertAdjacentElement('afterend', message);
 			} finally {
-				setFormBusy(form, false);
+				if (!localTap) setFormBusy(form, false);
 			}
 
 			if (saveFailed) {
@@ -244,7 +262,7 @@ function bindChecklistAsyncForms() {
 			if (form.classList.contains('send-wrap')) {
 				if (window.LocalFirst) {
 					const button = form.querySelector('button');
-					if (button) { button.disabled = true; button.textContent = 'Envío pendiente de sincronización'; }
+					if (button) { button.dataset.queued = '1'; button.disabled = true; button.textContent = 'Envío pendiente de sincronización'; }
 					return;
 				}
 				try {
@@ -642,6 +660,32 @@ function applyQuickFilter(input) {
 		}
 	}
 }
+
+function showChecklistTab(tab) {
+	const screens = document.querySelectorAll('[data-check-tab]');
+	for (const screen of screens) screen.classList.toggle('active', screen.dataset.checkTab === tab);
+}
+
+document.addEventListener('click', event => {
+	const link = event.target.closest('.btn-go-list,.btn-edit-list,.btn-check');
+	if (!link || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || event.button !== 0) return;
+	const target = new URL(link.href, window.location.href);
+	if (target.pathname !== '/checklist') return;
+	const tab = target.searchParams.get('tab') || 'view';
+	if (!document.querySelector(`[data-check-tab="${tab}"]`)) return;
+	event.preventDefault();
+	showChecklistTab(tab);
+	if (window.CHECKLIST_MEMBERSHIP_DIRTY && window.LocalFirst) {
+		window.LocalFirst.toast('Preparando los productos añadidos…');
+		window.LocalFirst.flush().then(() => { window.location.href = target.href; }).catch(error => window.LocalFirst.toast(error.message));
+		return;
+	}
+	window.history.pushState(null, '', target.href);
+});
+
+if (typeof window.addEventListener === 'function') window.addEventListener('popstate', () => {
+	showChecklistTab(new URL(window.location.href).searchParams.get('tab') || 'view');
+});
 
 document.addEventListener('DOMContentLoaded', () => {
 	restoreScrollFromQuery();

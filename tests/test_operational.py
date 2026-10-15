@@ -88,9 +88,17 @@ class OperationalRegression(unittest.TestCase):
             self.assertEqual(db.session.get(InventarioSede,(2,'P1')).stock_actual,3)
             self.assertNotIn('P1',{p.id_producto for p in _get_checklist_catalog(db.session.get(Usuario,'chef'))})
 
-    def test_warehouse_cash_blocked_restaurant_available_to_admin(self):
-        self.assertEqual(self.general.get('/arqueo?sede=1&turno=NA').status_code,403)
+    def test_general_admin_is_the_only_warehouse_cash_exception(self):
+        self.assertEqual(self.general.get('/arqueo?sede=1&turno=NA').status_code,200)
         self.assertEqual(self.general.get('/arqueo?sede=2&turno=NA').status_code,200)
+        saved = self.general.post('/arqueo?sede=1&turno=NA', json={'fields': {'monto_inicial': '100'}}, headers={'X-CSRFToken': 'token'})
+        self.assertEqual(saved.status_code,200)
+        self.assertTrue(saved.json['ok'])
+        with self.app.app_context():
+            db.session.add(PermisoRol(id_rol=3, modulo='arqueo', lectura=True, escritura=True))
+            db.session.commit()
+            self.assertFalse(db.session.get(Usuario,'warehouse').can_view('arqueo'))
+        self.assertNotEqual(self.warehouse.get('/arqueo').status_code,200)
 
     def test_permission_matrix_and_area_assignment(self):
         self.assertEqual(self.general.get('/admin/permisos').status_code,200)
@@ -113,3 +121,64 @@ class OperationalRegression(unittest.TestCase):
         self.assertIn('Arroz',page)
         self.assertIn('cocinero',page)
         self.assertIn('Destino: Cocina',page)
+
+    def test_inventory_query_budget_is_independent_of_catalog_sizes(self):
+        from database import Categoria, Unidad
+        from sqlalchemy import event
+        with self.app.app_context():
+            db.session.add_all([Categoria(nombre_categoria=f'C{i}') for i in range(80)])
+            db.session.add_all([Unidad(nombre_unidad=f'U{i}') for i in range(80)])
+            db.session.commit()
+            engine = db.engine
+        statements = []
+        def capture(conn, cursor, sql, params, context, many):
+            statements.append(sql.lower())
+        event.listen(engine, 'before_cursor_execute', capture)
+        try:
+            response = self.warehouse.get('/inventario')
+            self.assertEqual(response.status_code, 200)
+            self.assertLess(response.data.count(b'<option'), 400, 'Hidden editors must not duplicate entire catalogs')
+        finally:
+            event.remove(engine, 'before_cursor_execute', capture)
+        self.assertLessEqual(len(statements), 15)
+        self.assertFalse(any(sql.lstrip().startswith(('insert', 'update', 'delete')) for sql in statements))
+
+    def test_quantity_taps_do_not_load_catalog_or_templates(self):
+        from sqlalchemy import event
+        with self.app.app_context(): engine = db.engine
+        statements = []
+        def capture(conn, cursor, sql, params, context, many): statements.append(sql.lower())
+        event.listen(engine, 'before_cursor_execute', capture)
+        try:
+            response = self.post(self.general, '/checklist?pedido_id=1', dict(action='qty_set', id_detalle='1', cantidad_pedida='5'), 'fast-write')
+        finally:
+            event.remove(engine, 'before_cursor_execute', capture)
+        self.assertEqual(response.status_code, 204)
+        self.assertLessEqual(len(statements), 12)
+        self.assertFalse(any('plantilla_checklist' in sql or 'categorias' in sql for sql in statements))
+
+    def test_sse_releases_worker_and_keeps_cursor_and_scope(self):
+        from database import EventoSistema
+        with self.app.app_context():
+            db.session.add_all([EventoSistema(modulo='checklist',id_sede=2,id_usuario='general',origen='other-device'), EventoSistema(modulo='checklist',id_sede=1,id_usuario='general',origen='private-device')])
+            db.session.commit()
+        response = self.chef.get('/api/events?after=0')
+        self.assertEqual(response.status_code,200)
+        self.assertIsNotNone(response.content_length, 'SSE must be a finite, already-built response')
+        text = response.get_data(as_text=True)
+        self.assertIn('other-device',text)
+        self.assertNotIn('private-device',text)
+        self.assertIn('event: cursor',text)
+
+    def test_static_assets_do_not_authenticate_or_query_database(self):
+        from sqlalchemy import event
+        with self.app.app_context(): engine = db.engine
+        statements=[]
+        def capture(*args): statements.append(args[2])
+        event.listen(engine,'before_cursor_execute',capture)
+        try: response=self.warehouse.get('/static/js/local-first.js')
+        finally: event.remove(engine,'before_cursor_execute',capture)
+        self.assertEqual(response.status_code,200)
+        self.assertEqual(statements,[])
+        self.assertIn('public', response.headers['Cache-Control'])
+        response.close()

@@ -11,6 +11,7 @@ dialog button { margin: .25rem; }
 button,a,input,select,textarea { touch-action: manipulation; }
 button,.btn-outline,.btn-send { min-height: 2.75rem; transition: transform 120ms ease-out, opacity 120ms ease-out; }
 button:active,.btn-outline:active,.btn-send:active { transform: scale(.98); }
+button:active,a:active { transition-duration: 0ms; }
 :focus-visible { outline: 3px solid #2375db; outline-offset: 3px; }
 .topbar { background: rgb(255 255 255 / 94%); backdrop-filter: blur(16px); }
 .inventory-table-wrap { max-width: 100%; overflow-x: auto; }

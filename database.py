@@ -1,5 +1,6 @@
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import UserMixin
+from flask import g, has_request_context
 from datetime import datetime
 from sqlalchemy import UniqueConstraint, event, select
 
@@ -58,6 +59,7 @@ class EventoSistema(db.Model):
 	modulo = db.Column(db.String(40), nullable=False)
 	id_sede = db.Column(db.Integer)
 	id_usuario = db.Column(db.String(50))
+	origen = db.Column(db.String(80))
 	creado_en = db.Column(db.DateTime, default=datetime.utcnow)
 
 
@@ -139,12 +141,23 @@ class Usuario(UserMixin, db.Model):
 	def turno_nombre(self):
 		return self.turno.nombre_turno if self.turno else ''
 
+	def _custom_permission(self, modulo):
+		if not self.id_rol:
+			return None
+		if not has_request_context():
+			return db.session.get(PermisoRol, (self.id_rol, modulo))
+		# Negative results must also be cached; legacy roles have no override rows.
+		cache = g.setdefault('role_permissions', {})
+		if self.id_rol not in cache:
+			cache[self.id_rol] = {p.modulo: p for p in PermisoRol.query.filter_by(id_rol=self.id_rol).all()}
+		return cache[self.id_rol].get(modulo)
+
 	def can_view(self, vista):
 		if vista == 'arqueo' and self.rol_nombre != 'admin_general' and self.sede and self.sede.nombre_sede.strip().casefold() in {'almacen', 'almacén'}:
 			return False
 		if self.rol_nombre == 'admin_general':
 			return True
-		custom = db.session.get(PermisoRol, (self.id_rol, vista)) if self.id_rol else None
+		custom = self._custom_permission(vista)
 		if custom is not None:
 			return custom.lectura
 		permissions = {
@@ -161,7 +174,7 @@ class Usuario(UserMixin, db.Model):
 			return False
 		if self.rol_nombre == 'admin_general':
 			return True
-		custom = db.session.get(PermisoRol, (self.id_rol, modulo)) if self.id_rol else None
+		custom = self._custom_permission(modulo)
 		if custom is not None:
 			return custom.escritura and action in {'insert', 'update', 'delete'}
 		full = {'insert', 'update', 'delete'}

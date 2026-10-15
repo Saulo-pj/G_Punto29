@@ -3,6 +3,8 @@
   'use strict';
   const nativeFetch = window.fetch.bind(window);
   const owner = window.CURRENT_USER;
+  const clientId = crypto.randomUUID();
+  let nextCreated = Date.now() * 1000;
   const operationalPaths = new Set(['/pedidos', '/checklist', '/arqueo']);
   const channel = 'BroadcastChannel' in window ? new BroadcastChannel('p29-sync') : null;
   let database, running = false, pending = 0, blocked = false, dirty = false;
@@ -73,13 +75,21 @@
     document.querySelectorAll('[name="csrf_token"]').forEach(el => { el.value = data.token; });
     return data.token;
   }
-  async function replay(row) {
-    const token = await freshToken();
-    const headers = { 'X-CSRFToken': token, 'X-Requested-With': 'XMLHttpRequest', 'X-Operation-ID': row.id, 'X-Operation-Date': row.date };
+  async function replay(row, token) {
+    const headers = { 'X-CSRFToken': token, 'X-Requested-With': 'XMLHttpRequest', 'X-Operation-ID': row.id, 'X-Operation-Date': row.date, 'X-Client-ID': row.source || clientId };
     let body;
     if (row.json) { headers['Content-Type'] = 'application/json'; body = row.body; }
     else { body = new FormData(); row.body.forEach(([k,v]) => body.append(k,v)); body.set('csrf_token', token); }
-    const response = await nativeFetch(row.url, { method: 'POST', headers, body, credentials: 'same-origin' });
+    const send = () => nativeFetch(row.url, { method: 'POST', headers, body, credentials: 'same-origin' });
+    let response = await send();
+    if (response.status === 403) {
+      let rejection; try { rejection = await response.clone().json(); } catch (_) {}
+      if (rejection?.error === 'csrf_error') {
+        headers['X-CSRFToken'] = await freshToken();
+        if (!row.json) body.set('csrf_token', headers['X-CSRFToken']);
+        response = await send();
+      }
+    }
     if (response.redirected || !response.ok || (!row.json && response.status !== 204)) {
       let message = 'No se pudo confirmar el guardado. Revisa los cambios pendientes.';
       try { const data = await response.json(); message = data.message || message; } catch (_) {}
@@ -94,14 +104,24 @@
     let count = 0;
     try {
       const work = async () => {
-        for (const row of await rows()) {
+        let batch = await rows();
+        if (!batch.length) return;
+        // Revalidate once per drain, rather than adding a round trip per tap.
+        const token = await freshToken();
+        while (batch.length) {
+          const row = batch[0];
           if (!navigator.onLine) break;
-          try { await replay(row); }
+          try {
+            const response = await replay(row, token);
+            if (row.json) window.dispatchEvent(new CustomEvent('p29-arqueo-confirmed', { detail: { row, data: await response.json() } }));
+          }
           catch (error) { if (error.response) { blocked = true; toast(error.message); } break; }
           await store('readwrite', s => s.delete(row.id)); count++;
+          batch = await rows();
         }
       };
-      if (navigator.locks) await navigator.locks.request('p29-outbox', work); else await work();
+      try { if (navigator.locks) await navigator.locks.request('p29-outbox', work); else await work(); }
+      catch (_) { /* Offline/auth failures leave the durable outbox intact. */ }
       if (count) { toast('Cambios sincronizados correctamente'); channel?.postMessage({ owner, type: 'synced' }); window.dispatchEvent(new CustomEvent('p29-synced')); }
     } finally { running = false; await status(); }
   }
@@ -111,9 +131,10 @@
     const json = typeof init.body === 'string';
     const body = json ? init.body : [...init.body.entries()].filter(([k]) => k !== 'csrf_token');
     if (!json && body.some(([,v]) => typeof v !== 'string')) throw new Error('Las importaciones requieren conexión.');
-    const row = { id: crypto.randomUUID(), owner, url: target.href, date: window.OPERATION_DATE, body, json, created: Date.now() };
+    nextCreated = Math.max(nextCreated + 1, Date.now() * 1000);
+    const row = { id: crypto.randomUUID(), owner, source: clientId, url: target.href, date: window.OPERATION_DATE, body, json, created: nextCreated };
     await store('readwrite', s => s.put(row));
-    await status();
+    void status();
     // Resolve immediately after durable local storage; the server is asynchronous.
     toast('Guardado en este dispositivo · pendiente de sincronización');
     void drain();
@@ -134,6 +155,7 @@
     if (target.origin !== location.origin || !['POST','PUT','PATCH','DELETE'].includes(method)) return nativeFetch(url, init);
     const headers = new Headers(init.headers || {});
     headers.set('X-CSRFToken', window.CSRF_TOKEN);
+    headers.set('X-Client-ID', clientId);
     const response = await nativeFetch(url, { ...init, headers });
     if (response.status === 403) {
       let data; try { data = await response.clone().json(); } catch (_) {}
@@ -147,6 +169,9 @@
       let field = form.querySelector('[name="csrf_token"]');
       if (!field) { field = document.createElement('input'); field.type = 'hidden'; field.name = 'csrf_token'; form.append(field); }
       field.value = window.CSRF_TOKEN;
+      let source = form.querySelector('[name="_client_id"]');
+      if (!source) { source = document.createElement('input'); source.type = 'hidden'; source.name = '_client_id'; form.append(source); }
+      source.value = clientId;
     }
   }, true);
   window.addEventListener('online', () => { blocked = false; void drain(); });
@@ -155,7 +180,7 @@
   channel?.addEventListener('message', event => { if (event.data.owner === owner) { void status(); toast('Datos actualizados en otra pestaña'); } });
   document.addEventListener('DOMContentLoaded', async () => {
     window.addEventListener('p29-synced', async () => {
-      if (!(await rows()).length && document.querySelector('.send-wrap button:disabled,.pedidos-send-form button:disabled')) location.reload();
+      if (!(await rows()).length && document.querySelector('.send-wrap button[data-queued],.pedidos-send-form button:disabled')) location.reload();
     });
     if ('serviceWorker' in navigator) {
       const identify = () => navigator.serviceWorker.controller?.postMessage({ type: 'OWNER', owner });
@@ -216,14 +241,17 @@
           try { localStorage.setItem(draftKey, JSON.stringify(draft)); } catch (_) { toast('No hay espacio para guardar el borrador local.'); }
         });
       });
-      window.addEventListener('p29-synced', () => { localStorage.removeItem(draftKey); dirty = false; if (!document.activeElement?.matches('input,select,textarea')) location.reload(); });
+      window.addEventListener('p29-cash-clean', () => { localStorage.removeItem(draftKey); dirty = false; });
     }
-    let stream;
+    let stream, cursor = null;
     function connectEvents() {
-      if (!('EventSource' in window) || !navigator.onLine || stream) return;
-      stream = new EventSource('/api/events');
+      if (!('EventSource' in window) || !navigator.onLine || stream || document.hidden) return;
+      stream = new EventSource(cursor === null ? '/api/events' : `/api/events?after=${encodeURIComponent(cursor)}`);
+      stream.addEventListener('cursor', event => { cursor = event.lastEventId; });
       stream.onmessage = async event => {
+        cursor = event.lastEventId;
         const data = JSON.parse(event.data);
+        if (data.source === clientId) return;
         if ((await rows()).length) return;
         const active = location.pathname.split('/')[1];
         if (data.module === active || data.module === 'ajustes') {
@@ -234,5 +262,9 @@
     }
     connectEvents();
     window.addEventListener('online', connectEvents);
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) { stream?.close(); stream = null; }
+      else connectEvents();
+    });
   });
 })();

@@ -823,6 +823,23 @@
 		bindRemove(document);
 		lockSavedGastos();
 		updateSummary();
+		window.addEventListener('p29-arqueo-confirmed', function (event) {
+			var result = event.detail;
+			var target = new URL(result.row.url);
+			if (target.pathname !== '/arqueo' || target.searchParams.get('sede') !== {{ target_sede_id|string|tojson }} || target.searchParams.get('turno') !== {{ target_turno_id|tojson }}) return;
+			var data = result.data;
+			if (data.duplicate) return;
+			ventaSistemaGuardada = Boolean(data.venta_sistema_guardada);
+			auditEnabled = Boolean(data.audit_enabled);
+			efectivoEntregadoGuardado = Boolean(data.efectivo_entregado_guardado);
+			efectivoDejadoGuardado = Boolean(data.efectivo_dejado_guardado);
+			lockSavedFields(data.locked_fields);
+			updateGastosState(data.gastos);
+			renderHistorial(data.logs);
+			updateSummary();
+			setStatus(data.message || 'Cambios sincronizados correctamente.');
+			if (!dirtyFields.size) window.dispatchEvent(new CustomEvent('p29-cash-clean'));
+		});
 		window.addEventListener('p29-restore-arqueo', function (event) {
 			var row = event.detail;
 			var target = new URL(row.url);

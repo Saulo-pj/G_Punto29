@@ -11,10 +11,11 @@ from io import BytesIO
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from collections import defaultdict
-from flask import Flask, abort, flash, jsonify, redirect, render_template, request, send_file, send_from_directory, url_for, session
+from flask import g, has_request_context, Flask, abort, flash, jsonify, redirect, render_template, request, send_file, send_from_directory, url_for, session
 from flask_login import LoginManager, current_user, login_required, login_user, logout_user
 from dotenv import load_dotenv
 from database_config import database_uri
+from sqlalchemy.orm import joinedload
 from sqlalchemy import or_
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import IntegrityError
@@ -198,7 +199,7 @@ def _seed_catalogs():
 
 @login_manager.user_loader
 def load_user(user_id):
-	return db.session.get(Usuario, user_id)
+	return db.session.get(Usuario, user_id, options=[joinedload(Usuario.rol), joinedload(Usuario.sede), joinedload(Usuario.turno)])
 
 
 def _forbidden_redirect():
@@ -899,10 +900,27 @@ def _get_subareas_for_area(area_name):
 	area_name = _normalize_area(area_name)
 	if not area_name:
 		return []
-	area = Area.query.filter(db.func.lower(Area.nombre_area) == area_name).first()
-	if not area:
-		return []
-	return [subarea.nombre_subarea for subarea in Subarea.query.filter_by(id_area=area.id_area).order_by(Subarea.nombre_subarea.asc()).all()]
+	if has_request_context() and 'subareas_by_area' in g:
+		return g.subareas_by_area.get(area_name, [])
+	rows = db.session.query(Area.nombre_area, Subarea.nombre_subarea).join(Subarea, Subarea.id_area == Area.id_area).order_by(Subarea.nombre_subarea).all()
+	mapping = defaultdict(list)
+	for name, subarea in rows:
+		mapping[_normalize_area(name)].append(subarea)
+	if has_request_context():
+		g.subareas_by_area = mapping
+	return mapping.get(area_name, [])
+
+
+def _category_labels():
+	if has_request_context() and 'category_labels' in g:
+		return g.category_labels
+	labels = {}
+	for category in Categoria.query.all():
+		labels[category.nombre_categoria.casefold()] = category.nombre_categoria
+		labels[str(category.id_categoria)] = category.nombre_categoria
+	if has_request_context():
+		g.category_labels = labels
+	return labels
 
 
 def _checklist_base_query(user, selected_date=None):
@@ -915,6 +933,50 @@ def _checklist_base_query(user, selected_date=None):
 	if selected_date is not None:
 		query = query.filter(db.func.date(ChecklistPedido.fecha) == selected_date)
 	return query
+
+
+def _save_checklist_quantity(user, selected_date):
+	"""Quantity taps do not build selectors, catalogs or personal templates."""
+	if not user.can_write('checklist', 'insert') or not (user.can_write('checklist', 'update') or user.rol_nombre == 'cocinero'):
+		return _forbidden_redirect()
+	admin = user.rol_nombre == 'admin_general'
+	query = db.session.query(DetallePedido, ChecklistPedido).join(ChecklistPedido, ChecklistPedido.id_pedido == DetallePedido.id_pedido).filter(
+		DetallePedido.id_detalle == _form_record_id('id_detalle'),
+		db.func.date(ChecklistPedido.fecha) == selected_date,
+	)
+	if not admin:
+		query = query.filter(ChecklistPedido.id_sede == user.id_sede, ChecklistPedido.id_turno == user.id_turno, DetallePedido.id_usuario == user.id_usuario)
+		if request.values.get('f_user') and request.values['f_user'] != user.id_usuario:
+			return _forbidden_redirect()
+	else:
+		if request.values.get('pedido_id'):
+			requested_order = request.values['pedido_id']
+			if not requested_order.isdigit():
+				abort(400)
+			query = query.filter(ChecklistPedido.id_pedido == int(requested_order))
+		if request.values.get('f_user'):
+			query = query.filter(DetallePedido.id_usuario == request.values['f_user'])
+	row = query.with_for_update().first()
+	if row:
+		detail, order = row
+		if not admin and order.estado_general not in {'Borrador', 'Pendiente'}:
+			db.session.rollback()
+			return jsonify(ok=False, message='La lista ya fue enviada.'), 409
+		action = request.form['action']
+		quantity = max(_safe_float(detail.cantidad_pedida), 0)
+		if action == 'qty_plus':
+			quantity += 1
+		elif action == 'qty_minus' and quantity > 1:
+			quantity -= 1
+		elif action == 'qty_clear':
+			quantity = 0
+		elif action == 'qty_set':
+			quantity = max(_safe_float(request.form.get('cantidad_pedida'), quantity), 0)
+		detail.cantidad_pedida = quantity
+	db.session.commit()
+	if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+		return ('', 204)
+	return redirect(url_for('checklist', tab='list', pedido_id=request.values.get('pedido_id'), f_user=request.values.get('f_user')))
 
 
 def _get_active_checklist(user, selected_date=None):
@@ -933,6 +995,10 @@ def _get_visible_checklist(user, selected_date=None):
 def _get_checklist_items(pedido, user=None, include_all=False, target_user_id='', target_area=''):
 	if not pedido:
 		return []
+	cache = g.setdefault('checklist_items', {}) if has_request_context() else {}
+	key = (pedido.id_pedido, user.id_usuario if user else None, include_all, target_user_id, target_area)
+	if key in cache:
+		return cache[key]
 	query = db.session.query(DetallePedido, Producto).join(
 		Producto, Producto.id_producto == DetallePedido.id_producto
 	).filter(
@@ -956,34 +1022,22 @@ def _get_checklist_items(pedido, user=None, include_all=False, target_user_id=''
 	# (fuente para agregar items) se obtiene desde el inventario central.
 	rows = query.order_by(Producto.nombre_producto.asc()).all()
 
-	# Adjuntar nombre legible de categoria (`categoria_display`) a cada Producto
-	# usando la misma lógica que en _get_checklist_catalog para asegurar
-	# consistencia entre catálogo e items del checklist.
 	if rows:
-		all_categorias = {c.nombre_categoria: c.nombre_categoria for c in Categoria.query.all()}
-		for detalle, producto in rows:
-			cat_display = ''
-			if producto and getattr(producto, 'id_area', None):
-				found = next((c for c in all_categorias.keys() if c.lower() == (producto.id_area or '').lower()), None)
-				if found:
-					cat_display = all_categorias[found]
-				else:
-					try:
-						cid = int(producto.id_area)
-						categoria_obj = Categoria.query.get(cid)
-						if categoria_obj:
-							cat_display = categoria_obj.nombre_categoria
-					except Exception:
-						pass
-			if not cat_display:
-				cat_display = producto.id_area or '' if producto else ''
-			if producto:
-				setattr(producto, 'categoria_display', cat_display)
+		labels = _category_labels()
+		for detail, product in rows:
+			product.categoria_display = labels.get((product.id_area or '').casefold(), product.id_area or '')
+		rows.sort(key=lambda pair: ((pair[1].categoria_display or '').casefold(), (pair[1].nombre_producto or '').casefold()))
 
-		# Ordenar filas para agrupar por categoria_display y luego por nombre de producto
-		rows.sort(key=lambda pair: ((pair[1].categoria_display or '').lower(), (pair[1].nombre_producto or '').lower()))
-
+	cache[key] = rows
 	return rows
+
+
+def _attach_request_metadata(rows, fallback_owner):
+	missing = {detail.id_usuario or fallback_owner for detail, _ in rows if not detail.rol_solicitante}
+	roles = dict(db.session.query(Usuario.id_usuario, Rol.nombre_rol).outerjoin(Rol, Rol.id_rol == Usuario.id_rol).filter(Usuario.id_usuario.in_(missing)).all()) if missing else {}
+	for detail, product in rows:
+		detail.rol_solicitante = detail.rol_solicitante or roles.get(detail.id_usuario or fallback_owner) or 'Sin rol'
+		detail.area_destino = detail.area_destino or product.area or 'Sin área'
 
 
 def _get_checklist_catalog(user, q='', id_sede=None):
@@ -1003,30 +1057,9 @@ def _get_checklist_catalog(user, q='', id_sede=None):
 	preferred_area = _preferred_area_for_user(user)
 	productos = query.all()
 
-	# Resolver nombre de categoría legible para cada producto y adjuntarlo como
-	# atributo `categoria_display` para uso en plantillas. Producto.id_area puede
-	# contener nombre de categoría o un identificador; intentamos coincidir con
-	# la tabla Categoria por nombre o por id (cuando sea numérico).
-	all_categorias = {c.nombre_categoria: c.nombre_categoria for c in Categoria.query.all()}
-	for p in productos:
-		cat_display = ''
-		if p.id_area:
-			# intento directo por nombre (case-insensitive)
-			found = next((c for c in all_categorias.keys() if c.lower() == (p.id_area or '').lower()), None)
-			if found:
-				cat_display = all_categorias[found]
-			else:
-				# si id_area tiene formato numérico, buscar por id_categoria
-				try:
-					cid = int(p.id_area)
-					categoria_obj = Categoria.query.get(cid)
-					if categoria_obj:
-						cat_display = categoria_obj.nombre_categoria
-				except Exception:
-					pass
-		if not cat_display:
-			cat_display = p.id_area or ''
-		setattr(p, 'categoria_display', cat_display)
+	labels = _category_labels()
+	for product in productos:
+		product.categoria_display = labels.get((product.id_area or '').casefold(), product.id_area or '')
 	# Ordenar por categoria legible y luego por nombre de producto para que en la
 	# interfaz las categorias aparezcan agrupadas.
 	def _sort_key(p):
@@ -1042,12 +1075,14 @@ def _get_checklist_catalog(user, q='', id_sede=None):
 
 
 def _preferred_area_for_user(user):
-	assigned = db.session.query(Area.nombre_area).join(AreaSedeRol, AreaSedeRol.id_area == Area.id_area).filter(
-		AreaSedeRol.id_sede == user.id_sede, AreaSedeRol.id_rol == user.id_rol,
-	).order_by(Area.nombre_area).first()
-	if assigned:
-		return assigned[0]
-	return _preferred_area_for_role_name(user.rol_nombre)
+	cache = g.setdefault('preferred_areas', {}) if has_request_context() else {}
+	if user.id_sede not in cache:
+		rows = db.session.query(AreaSedeRol.id_rol, Area.nombre_area).join(Area, Area.id_area == AreaSedeRol.id_area).filter(AreaSedeRol.id_sede == user.id_sede).order_by(Area.nombre_area).all()
+		mapping = {}
+		for role_id, name in rows:
+			mapping.setdefault(role_id, name)
+		cache[user.id_sede] = mapping
+	return cache[user.id_sede].get(user.id_rol, _preferred_area_for_role_name(user.rol_nombre))
 
 
 def _preferred_area_for_role_name(role_name):
@@ -1063,7 +1098,7 @@ def _checklist_scope_users(user):
 	users = Usuario.query.join(Rol, Rol.id_rol == Usuario.id_rol).filter(
 		Usuario.id_sede == user.id_sede,
 		Usuario.id_turno == user.id_turno,
-	).all()
+	).options(joinedload(Usuario.rol), joinedload(Usuario.sede)).all()
 	users = [scope_user for scope_user in users if scope_user.can_view('checklist')]
 	if preferred_area:
 		users = [scope_user for scope_user in users if _preferred_area_for_user(scope_user) == preferred_area]
@@ -1225,6 +1260,9 @@ def _sync_checklist_items_with_template(checklist, template_product_ids, user_id
 	).all()
 
 	existing_by_product = {item.id_producto: item for item in existing_items}
+	missing = set(template_product_ids) - set(existing_by_product)
+	areas = dict(db.session.query(Producto.id_producto, Producto.area).filter(Producto.id_producto.in_(missing)).all()) if missing else {}
+	role_name = db.session.query(Rol.nombre_rol).join(Usuario, Usuario.id_rol == Rol.id_rol).filter(Usuario.id_usuario == user_id).scalar() if missing else ''
 	for id_producto in template_product_ids:
 		if id_producto in existing_by_product:
 			continue
@@ -1233,6 +1271,8 @@ def _sync_checklist_items_with_template(checklist, template_product_ids, user_id
 				id_pedido=checklist.id_pedido,
 				id_usuario=user_id,
 				id_producto=id_producto,
+				area_destino=areas.get(id_producto) or '',
+				rol_solicitante=role_name or '',
 				cantidad_pedida=0.0,
 				estado_sede='Pendiente',
 			)
@@ -1291,16 +1331,8 @@ def _build_checklist_from_template_if_needed(user, selected_date):
 	)
 	db.session.add(checklist)
 	db.session.flush()
-	for id_producto in sorted(template_product_ids):
-		db.session.add(
-			DetallePedido(
-				id_pedido=checklist.id_pedido,
-				id_usuario=user.id_usuario,
-				id_producto=id_producto,
-				cantidad_pedida=0.0,
-				estado_sede='Pendiente',
-			)
-		)
+	_sync_checklist_items_with_template(checklist, template_product_ids, user.id_usuario)
+
 	return checklist
 
 
@@ -1318,6 +1350,10 @@ def _complete_checklist_if_all_received(pedido):
 
 def _ensure_inventory_schema(app):
 	inspector = inspect(db.engine)
+	event_columns = {column['name'] for column in inspector.get_columns('eventos_sistema')}
+	if 'origen' not in event_columns:
+		with db.engine.begin() as connection:
+			connection.execute(text('ALTER TABLE eventos_sistema ADD COLUMN origen VARCHAR(80)'))
 	columns = {column['name'] for column in inspector.get_columns('productos')}
 	if 'unidad' not in columns:
 		with db.engine.begin() as connection:
@@ -1509,7 +1545,13 @@ def create_app():
 	app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 	# Evita que el navegador conserve plantillas y recursos durante el desarrollo.
 	app.config['TEMPLATES_AUTO_RELOAD'] = True
-	app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
+	app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 86400
+	asset_version = str(max((os.path.getmtime(os.path.join(root, name)) for root, _, names in os.walk(app.static_folder) for name in names), default=0))
+
+	@app.url_defaults
+	def version_static_assets(endpoint, values):
+		if endpoint == 'static':
+			values['v'] = asset_version
 
 	secret_key = os.environ.get('SECRET_KEY')
 	is_production = bool(
@@ -1561,6 +1603,12 @@ def create_app():
 
 	@app.after_request
 	def disable_browser_cache(response):
+		if request.endpoint == 'static':
+			response.headers['Cache-Control'] = 'public, max-age=86400'
+			return response
+		if request.endpoint in {'service_worker', 'manifest'}:
+			response.headers['Cache-Control'] = 'no-cache'
+			return response
 		if current_user.is_authenticated:
 			response.headers['X-App-User'] = current_user.id_usuario
 		response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
@@ -1884,9 +1932,6 @@ def create_app():
 				else:
 					flash('El area ya existe o esta vacia.', 'error')
 
-		_sync_master_stock_rows()
-		db.session.commit()
-
 		q = request.args.get('q', '').strip()
 		categoria = request.args.get('categoria', '').strip()
 		area = _normalize_area(request.args.get('area', '').strip())
@@ -1897,14 +1942,8 @@ def create_app():
 		categorias = Categoria.query.order_by(Categoria.nombre_categoria).all()
 		unidades = Unidad.query.order_by(Unidad.nombre_unidad).all()
 		areas = Area.query.order_by(Area.nombre_area).all()
-		category_counts = {
-			categoria_row.nombre_categoria: Producto.query.filter(Producto.id_area == categoria_row.nombre_categoria).count()
-			for categoria_row in categorias
-		}
-		unit_counts = {
-			unidad_row.nombre_unidad: Producto.query.filter(Producto.unidad == unidad_row.nombre_unidad).count()
-			for unidad_row in unidades
-		}
+		category_counts = dict(db.session.query(Producto.id_area, db.func.count()).group_by(Producto.id_area).all())
+		unit_counts = dict(db.session.query(Producto.unidad, db.func.count()).group_by(Producto.unidad).all())
 		subareas = _get_subareas_for_area(area or 'cocina')
 		return render_template(
 			'dashboard/inventario.html',
@@ -2542,10 +2581,7 @@ def create_app():
 						)
 					)
 				selected_items = selected_items_query.order_by(Producto.id_area.asc(), db.func.lower(Producto.nombre_producto).asc()).all()
-				for detail, product in selected_items:
-					owner = db.session.get(Usuario, detail.id_usuario or selected_pedido.id_usuario)
-					detail.rol_solicitante = detail.rol_solicitante or (owner.rol_nombre if owner else 'Sin rol')
-					detail.area_destino = detail.area_destino or product.area or 'Sin área'
+				_attach_request_metadata(selected_items, selected_pedido.id_usuario)
 
 				# Nombre legible de sede/turno para la UI de impresión
 				if selected_pedido:
@@ -2556,15 +2592,15 @@ def create_app():
 						turno_obj = Turno.query.get(selected_pedido.id_turno)
 						selected_turno_nombre = turno_obj.nombre_turno if turno_obj else ''
 
-		pedido_area_map = {}
-		for pedido_obj, _, _ in pedido_rows:
-			areas = db.session.query(Producto.area).join(
-				DetallePedido, DetallePedido.id_producto == Producto.id_producto
-			).filter(
-				DetallePedido.id_pedido == pedido_obj.id_pedido
-			).distinct().all()
-			area_labels = [(_normalize_area(area_name) or area_name or '').title() for (area_name,) in areas if area_name]
-			pedido_area_map[pedido_obj.id_pedido] = ', '.join(area_labels) if area_labels else '-'
+		pedido_area_map = {p.id_pedido: '-' for p, _, _ in pedido_rows}
+		area_groups = defaultdict(set)
+		if pedido_area_map:
+			area_rows = db.session.query(DetallePedido.id_pedido, Producto.area).join(Producto, Producto.id_producto == DetallePedido.id_producto).filter(DetallePedido.id_pedido.in_(pedido_area_map)).distinct().all()
+			for order_id, name in area_rows:
+				if name:
+					area_groups[order_id].add(_normalize_area(name).title())
+			for order_id, names in area_groups.items():
+				pedido_area_map[order_id] = ', '.join(sorted(names))
 
 		return render_template(
 			'dashboard/pedidos.html',
@@ -2607,10 +2643,7 @@ def create_app():
 		if selected_ids:
 			items = [(d, p) for d, p in items if d.id_detalle in selected_ids]
 		items.sort(key=lambda pair: ((pair[1].id_area or '').casefold(), pair[1].nombre_producto.casefold()))
-		for detail, product in items:
-			owner = db.session.get(Usuario, detail.id_usuario or pedido.id_usuario)
-			detail.rol_solicitante = detail.rol_solicitante or (owner.rol_nombre if owner else 'Sin rol')
-			detail.area_destino = detail.area_destino or product.area or 'Sin área'
+		_attach_request_metadata(items, pedido.id_usuario)
 		sede = db.session.get(Sede, pedido.id_sede) if pedido.id_sede else None
 		turno = db.session.get(Turno, pedido.id_turno) if pedido.id_turno else None
 		return render_template(
@@ -2628,6 +2661,8 @@ def create_app():
 		if not current_user.can_view('checklist'):
 			return _forbidden_redirect()
 		selected_date = _get_selected_app_date()
+		if request.method == 'POST' and request.form.get('action') in {'qty_plus', 'qty_minus', 'qty_clear', 'qty_set'}:
+			return _save_checklist_quantity(current_user, selected_date)
 		is_admin_general = current_user.rol_nombre == 'admin_general'
 		selected_pedido_raw = request.values.get('pedido_id', '').strip()
 		selected_pedido_id = int(selected_pedido_raw) if selected_pedido_raw.isdigit() else None
@@ -2648,7 +2683,8 @@ def create_app():
 			seeded_checklist = _build_checklist_from_template_if_needed(current_user, selected_date)
 			if seeded_checklist is not None:
 				if request.method == 'GET':
-					db.session.commit()
+					if db.session.new or db.session.dirty or db.session.deleted:
+						db.session.commit()
 				else:
 					db.session.flush()
 			scope_users = _checklist_scope_users(current_user)
@@ -3017,7 +3053,7 @@ def create_app():
 			except (TypeError, ValueError):
 				catalog_sede_id = current_user.id_sede
 		catalog_products = _get_checklist_catalog(current_user, selected_q, id_sede=catalog_sede_id)
-		all_catalog_products = _get_checklist_catalog(current_user, '', id_sede=catalog_sede_id)
+		all_catalog_products = catalog_products if not selected_q else _get_checklist_catalog(current_user, '', id_sede=catalog_sede_id)
 		active_tab = request.args.get('tab', 'view').strip().lower() or 'view'
 		if active_tab not in {'view', 'list', 'edit'}:
 			active_tab = 'view'
@@ -3639,7 +3675,7 @@ def create_app():
 			if f_turno:
 				target_turno_id = f_turno
 
-		if is_warehouse(db.session.get(Sede, target_sede_id)):
+		if not is_admin_general and is_warehouse(db.session.get(Sede, target_sede_id)):
 			abort(403, description='Arqueo de caja no disponible en Almacén.')
 
 		if not target_sede_id or not target_turno_id:
@@ -3747,7 +3783,7 @@ def create_app():
 		target_sede = Sede.query.get(target_sede_id)
 		target_turno = Turno.query.get(target_turno_id)
 		if is_admin_general:
-			sedes_disponibles = [s for s in Sede.query.order_by(Sede.nombre_sede.asc()).all() if not is_warehouse(s)]
+			sedes_disponibles = Sede.query.order_by(Sede.nombre_sede.asc()).all()
 			turnos_disponibles = Turno.query.order_by(Turno.nombre_turno.asc()).all()
 
 		return render_template(

@@ -1,9 +1,8 @@
 """Additive administration and synchronization for the existing Flask modules."""
 import hashlib
 import json
-import time
 
-from flask import abort, g, jsonify, render_template, request, session, Response, stream_with_context
+from flask import abort, g, jsonify, render_template, request, session, Response
 from flask_login import current_user, login_required
 from sqlalchemy.exc import IntegrityError
 from database import db, Rol, Usuario, Sede, Area, AreaSede, AreaSedeRol, PermisoRol, OperacionLocal, EventoSistema
@@ -76,7 +75,8 @@ def register_operations(app, csrf_token):
             return jsonify(ok=False, message=errors[-1]), 422
         if response.status_code < 400 and not errors:
             module = {'/admin/ajustes': 'ajustes', '/admin/permisos': 'ajustes', '/inventario/import': 'inventario'}.get(request.path, request.path[1:])
-            db.session.add(EventoSistema(modulo=module, id_sede=current_user.id_sede, id_usuario=current_user.id_usuario))
+            source = (request.headers.get('X-Client-ID') or request.form.get('_client_id') or '')[:80]
+            db.session.add(EventoSistema(modulo=module, id_sede=current_user.id_sede, id_usuario=current_user.id_usuario, origen=source))
             db.session.commit()
         else:
             db.session.rollback()
@@ -85,29 +85,20 @@ def register_operations(app, csrf_token):
     @app.get('/api/events')
     @login_required
     def events():
-        user_id = current_user.id_usuario
         raw = request.headers.get('Last-Event-ID', request.args.get('after', ''))
         last = int(raw) if raw.isdigit() else (db.session.query(db.func.max(EventoSistema.id)).scalar() or 0)
-
-        @stream_with_context
-        def generate():
-            nonlocal last
-            yield ': connected\n\n'
-            # Bounded streams release workers; EventSource reconnects automatically.
-            for _ in range(20):
-                db.session.expire_all()
-                user = db.session.get(Usuario, user_id)
-                if not user:
-                    return
-                rows = EventoSistema.query.filter(EventoSistema.id > last).order_by(EventoSistema.id).limit(100).all()
-                for row in rows:
-                    last = row.id
-                    if user.can_view(row.modulo) and (row.modulo in {'inventario', 'ajustes'} or user.rol_nombre in {'admin_general', 'admin_almacen', 'personal_prod'} or row.id_sede == user.id_sede):
-                        yield f'id: {row.id}\ndata: {json.dumps({"module": row.modulo, "actor": row.id_usuario})}\n\n'
-                db.session.remove()
-                yield f'id: {last}\n: heartbeat\n\n'
-                time.sleep(1)
-        return Response(generate(), mimetype='text/event-stream', headers={'X-Accel-Buffering': 'no', 'Cache-Control': 'no-store'})
+        # A short SSE response releases the HTTP connection and Gunicorn thread.
+        # EventSource resumes at the cursor after the retry interval, including
+        # when no visible events exist. No sleepers or long-held DB sessions.
+        frames = ['retry: 2000\n\n']
+        rows = EventoSistema.query.filter(EventoSistema.id > last).order_by(EventoSistema.id).limit(100).all()
+        for row in rows:
+            last = row.id
+            if current_user.can_view(row.modulo) and (row.modulo in {'inventario', 'ajustes'} or current_user.rol_nombre in {'admin_general', 'admin_almacen', 'personal_prod'} or row.id_sede == current_user.id_sede):
+                payload = {'module': row.modulo, 'actor': row.id_usuario, 'source': row.origen}
+                frames.append(f'id: {row.id}\ndata: {json.dumps(payload)}\n\n')
+        frames.append(f'id: {last}\nevent: cursor\ndata: {last}\n\n')
+        return Response(''.join(frames), mimetype='text/event-stream', headers={'X-Accel-Buffering': 'no', 'Cache-Control': 'no-store'})
 
     @app.route('/admin/permisos', methods=['GET', 'POST'])
     @login_required
