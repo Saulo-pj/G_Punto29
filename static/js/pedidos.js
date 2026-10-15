@@ -12,6 +12,7 @@ function setFormScroll(form) {
 async function submitAsync(form, formData) {
 	const targetUrl = form.getAttribute('action') || window.location.href;
 	const targetMethod = (form.getAttribute('method') || 'POST').toUpperCase();
+	if (window.LocalFirst) return window.LocalFirst.save(targetUrl, { method: targetMethod, body: formData });
 	const response = await fetch(targetUrl, {
 		method: targetMethod,
 		body: formData,
@@ -20,7 +21,7 @@ async function submitAsync(form, formData) {
 		},
 		credentials: 'same-origin',
 	});
-	if (!response.ok) {
+	if (!response.ok || response.redirected || response.status !== 204) {
 		throw new Error('No se pudo guardar.');
 	}
 }
@@ -171,7 +172,7 @@ function bindPedidosAsyncForms() {
 				if (lineSnapshot) {
 					restoreLineState(form, lineSnapshot);
 				}
-				shouldFallbackSyncSubmit = true;
+				window.LocalFirst?.toast(error.message || 'No se pudo guardar.');
 			} finally {
 				setBusy(form, false);
 			}
@@ -187,6 +188,11 @@ function bindPedidosAsyncForms() {
 			}
 
 			if (form.classList.contains('pedidos-send-form')) {
+				if (window.LocalFirst) {
+					const button = form.querySelector('button');
+					if (button) { button.disabled = true; button.textContent = 'Envío pendiente de sincronización'; }
+					return;
+				}
 				const statusPill = document.querySelector('.pedidos-detail-head .status-pill');
 				if (statusPill) {
 					statusPill.textContent = 'Enviado';

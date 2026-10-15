@@ -1,0 +1,36 @@
+{% extends 'base.html' %}
+{% block title %}Roles y permisos{% endblock %}
+{% block content %}
+<h1>Roles, áreas y permisos</h1>
+<p class="muted">Organiza cada sede y define el acceso a sus módulos.</p>
+{% if error %}<p role="alert">{{ error }}</p>{% endif %}
+{% if saved %}<p role="status" class="alert ok">Cambios guardados correctamente.</p>{% endif %}
+<div class="grid-2">
+<section class="card"><h2>Crear rol global</h2><form method="POST" class="inline-form">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="role">
+<label>Nombre <input name="nombre" required maxlength="50" placeholder="Supervisor"></label><button>Crear rol</button></form></section>
+<section class="card"><h2>Crear área en una sede</h2><form method="POST" class="inline-form">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="area">
+<label>Sede <select name="id_sede">{% for sede in sedes %}<option value="{{ sede.id_sede }}">{{ sede.nombre_sede }}</option>{% endfor %}</select></label>
+<label>Área <input name="nombre" required maxlength="50" placeholder="Cocina"></label><button>Crear área</button></form></section>
+</div>
+<section class="card"><h2>Matriz de permisos</h2>
+<form method="GET"><label>Rol <select name="id_rol" onchange="this.form.submit()">{% for rol in roles %}<option value="{{ rol.id_rol }}" {% if rol.id_rol == selected.id_rol %}selected{% endif %}>{{ rol.nombre_rol }}</option>{% endfor %}</select></label></form>
+<form method="POST"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="matrix"><input type="hidden" name="id_rol" value="{{ selected.id_rol }}">
+<div class="inventory-table-wrap"><table class="inventory-table"><thead><tr><th>Módulo</th><th>Ver</th><th>Editar</th></tr></thead><tbody>
+{% for module in modules %}<tr><th>{{ module|replace('_', ' ')|title }}</th>
+<td><input type="checkbox" name="{{ module }}_read" aria-label="Ver {{ module }}" {% if sample.can_view(module) %}checked{% endif %} {% if selected.nombre_rol == 'admin_general' %}disabled{% endif %}></td>
+<td><input type="checkbox" name="{{ module }}_write" aria-label="Editar {{ module }}" {% if sample.can_write(module) %}checked{% endif %} {% if selected.nombre_rol == 'admin_general' %}disabled{% endif %}></td></tr>{% endfor %}
+</tbody></table></div>
+{% if selected.nombre_rol != 'admin_general' %}<button>Guardar permisos</button>{% else %}<p>Admin General conserva acceso completo.</p>{% endif %}</form></section>
+<section class="card"><h2>Roles por área</h2>
+{% for scope, sede, area in scopes %}<form method="POST" class="area-roles-form">
+<h3>{{ sede.nombre_sede }} · {{ area.nombre_area|title }}</h3><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="area_roles"><input type="hidden" name="id_sede" value="{{ sede.id_sede }}"><input type="hidden" name="id_area" value="{{ area.id_area }}">
+<div class="role-options">{% for role in roles %}<label><input type="checkbox" name="roles" value="{{ role.id_rol }}" {% if (sede.id_sede, area.id_area, role.id_rol) in assigned %}checked{% endif %}> {{ role.nombre_rol }}</label>{% endfor %}</div><button>Guardar roles del área</button></form>
+{% else %}<p class="muted">Crea un área para asignar sus roles.</p>{% endfor %}</section>
+<script>
+document.querySelectorAll('[name$="_write"]').forEach(input => input.addEventListener('change', () => {
+  if (input.checked) input.form.elements[input.name.replace('_write', '_read')].checked = true;
+}));
+</script>
+{% endblock %}

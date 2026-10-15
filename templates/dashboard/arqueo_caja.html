@@ -534,9 +534,11 @@
 				headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
 				body: JSON.stringify({ section: 'partial', event: eventName, fields: fields })
 			}).then(function (response) {
+				if (response.queued) return { queued: true };
 				if (!response.ok) throw new Error('HTTP ' + response.status);
 				return response.json();
 			}).then(function (data) {
+				if (data && data.queued) { dirtyFields.clear(); setStatus('Guardado en este dispositivo · pendiente de sincronización'); return; }
 				if (!data || data.ok === false) {
 					throw new Error((data && data.message) || 'No se pudo confirmar el guardado.');
 				}
@@ -561,7 +563,7 @@
 		function markDirty(name) {
 			if (!lockedFields.has(name) || isAdminGeneral) dirtyFields.add(name);
 			clearTimeout(autosaveTimer);
-			autosaveTimer = setTimeout(function () { saveChanged('AUTOGUARDADO_5MIN'); }, 300000);
+			autosaveTimer = setTimeout(function () { saveChanged('AUTOGUARDADO_5MIN'); }, 600);
 		}
 
 		document.querySelectorAll('input, select, textarea').forEach(function (element) {
@@ -821,6 +823,34 @@
 		bindRemove(document);
 		lockSavedGastos();
 		updateSummary();
+		window.addEventListener('p29-restore-arqueo', function (event) {
+			var row = event.detail;
+			var target = new URL(row.url);
+			if (target.pathname !== '/arqueo' || target.searchParams.get('sede') !== {{ target_sede_id|string|tojson }} || target.searchParams.get('turno') !== {{ target_turno_id|tojson }}) return;
+			var fields = JSON.parse(row.body).fields || {};
+			Object.keys(fields).forEach(function (name) {
+				if (name === 'gastos') return;
+				document.querySelectorAll('input[name],textarea[name]').forEach(function (input) {
+					if (input.name === name && !input.disabled) input.value = fields[name];
+				});
+			});
+			if (Array.isArray(fields.gastos)) {
+				list.querySelectorAll('.gasto-item').forEach(function (item) {
+					if (item.dataset.locked !== 'true' && !fields.gastos.some(function (g) { return g.id === item.dataset.gastoId; })) item.remove();
+				});
+				fields.gastos.forEach(function (g) {
+					var item = Array.from(list.querySelectorAll('.gasto-item')).find(function (item) { return item.dataset.gastoId === g.id; });
+					if (!item && !addBtn.disabled) { addBtn.click(); item = list.lastElementChild; item.dataset.gastoId = g.id; }
+					if (!item) return;
+					[['gasto_tipo[]', g.tipo], ['gasto_nombre[]', g.nombre], ['gasto_monto[]', g.monto]].forEach(function (pair) {
+						var input = item.querySelector('[name="' + pair[0] + '"]');
+						if (input && !input.disabled) input.value = pair[1];
+					});
+				});
+			}
+			updateSummary();
+			setStatus('Cambios locales pendientes de sincronización.');
+		});
 	})();
 </script>
 {% endblock %}

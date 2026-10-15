@@ -4,6 +4,7 @@
 <h1>Inventario</h1>
 
 <form method="GET" class="inventory-filters">
+{% if current_user.rol_nombre == "admin_general" %}<div><label>Stock por sede</label><select name="id_sede">{% for sede in stock_sedes %}<option value="{{ sede.id_sede }}" {% if sede.id_sede == selected_stock_sede %}selected{% endif %}>{{ sede.nombre_sede }}</option>{% endfor %}</select></div>{% endif %}
 	<div>
 		<label>Buscar productos</label>
 		<input type="text" name="q" value="{{ selected_q }}" placeholder="ID, nombre, categoria o subarea">
@@ -46,7 +47,7 @@
 	</div>
 	<div class="inventory-actions-top">
 		<button type="submit">Filtrar</button>
-		<a class="btn-outline" href="{{ url_for('inventario_export', q=selected_q, categoria=selected_categoria, area=selected_area, subarea=selected_subarea, unidad=selected_unidad) }}">Exportar</a>
+		<a class="btn-outline" href="{{ url_for('inventario_export', q=selected_q, categoria=selected_categoria, area=selected_area, subarea=selected_subarea, unidad=selected_unidad, id_sede=selected_stock_sede) }}">Exportar</a>
 	</div>
 </form>
 
@@ -61,7 +62,7 @@
 			<th>Subarea</th>
 			<th>Unidad</th>
 			<th>Punto minimo</th>
-			<th>Stock central</th>
+			<th>Stock de sede</th>
 			<th>Estado stock</th>
 			<th>Estado</th>
 			<th>Acciones</th>
@@ -102,12 +103,14 @@
 				{% if can_edit %}
 				<div class="actions-row">
 					<button type="button" class="edit-row-btn" data-target="edit-row-{{ prod.id_producto|replace(' ', '_') }}">Editar</button>
-					<form method="POST" class="mini-form" onsubmit="return confirm('Eliminar producto del inventario?');">
+					{% if can_manage_catalog %}
+					<form method="POST" class="mini-form" onsubmit="return confirm('¿Retirar este producto del catálogo de todas las sedes? El historial se conserva.');">
 						<input type="hidden" name="action" value="delete_product">
 						<input type="hidden" name="id_producto" value="{{ prod.id_producto }}">
 						<input type="hidden" name="id_sede" value="{{ sede.id_sede if sede else current_user.id_sede }}">
 						<button class="btn-delete" type="submit">Eliminar</button>
 					</form>
+					{% endif %}
 				</div>
 				{% else %}
 				Solo lectura
@@ -122,27 +125,28 @@
 					<input type="hidden" name="id_producto" value="{{ prod.id_producto }}">
 					<input type="hidden" name="id_sede" value="{{ sede.id_sede if sede else current_user.id_sede }}">
 					<div class="edit-grid">
-						<input type="text" name="nombre_producto" value="{{ prod.nombre_producto }}" placeholder="Nombre producto" required>
-						<select name="id_area" required>
+						{% if not can_manage_catalog %}<p class="muted">Edita el stock y punto mínimo de tu sede. El catálogo se administra en Almacén.</p>{% endif %}
+						<input type="text" name="nombre_producto" value="{{ prod.nombre_producto }}" placeholder="Nombre producto" required {% if not can_manage_catalog %}readonly{% endif %}>
+						<select name="id_area" required {% if not can_manage_catalog %}disabled{% endif %}>
 							{% for c in categorias %}
 							<option value="{{ c.nombre_categoria }}" {% if c.nombre_categoria == prod.id_area %}selected{% endif %}>{{ c.nombre_categoria }}</option>
 							{% endfor %}
 						</select>
-						<select name="area" class="area-select" data-subarea-target="edit-subarea-{{ prod.id_producto|replace(' ', '_') }}" required>
+						<select name="area" class="area-select" data-subarea-target="edit-subarea-{{ prod.id_producto|replace(' ', '_') }}" required {% if not can_manage_catalog %}disabled{% endif %}>
 							{% for a in areas %}
 							<option value="{{ a.nombre_area }}" {% if prod.area == a.nombre_area %}selected{% endif %}>{{ a.nombre_area|title }}</option>
 							{% endfor %}
 						</select>
-						<select id="edit-subarea-{{ prod.id_producto|replace(' ', '_') }}" name="subarea" class="subarea-select" data-current="{{ prod.subarea or '' }}"></select>
-						<select name="unidad" required>
+						<select id="edit-subarea-{{ prod.id_producto|replace(' ', '_') }}" name="subarea" class="subarea-select" data-current="{{ prod.subarea or '' }}" {% if not can_manage_catalog %}disabled{% endif %}></select>
+						<select name="unidad" required {% if not can_manage_catalog %}disabled{% endif %}>
 							{% for u in unidades %}
 							<option value="{{ u.nombre_unidad }}" {% if u.nombre_unidad == prod.unidad %}selected{% endif %}>{{ u.nombre_unidad }}</option>
 							{% endfor %}
 						</select>
-						<input type="number" step="0.01" min="0" name="costo_unitario" value="{{ prod.costo_unitario or 0 }}" placeholder="Costo unitario">
+						<input type="number" step="0.01" min="0" name="costo_unitario" value="{{ prod.costo_unitario or 0 }}" placeholder="Costo unitario" {% if not can_manage_catalog %}readonly{% endif %}>
 						<input type="number" step="0.01" name="punto_minimo" value="{{ inv.punto_minimo if inv else 0 }}" placeholder="Punto minimo">
 						<input type="number" step="0.01" name="stock_actual" value="{{ inv.stock_actual if inv else 0 }}" placeholder="Stock central">
-						<select name="estado">
+						<select name="estado" {% if not can_manage_catalog %}disabled{% endif %}>
 							<option value="Activo" {% if (prod.estado or 'Activo') == 'Activo' %}selected{% endif %}>Activo</option>
 							<option value="Inactivo" {% if prod.estado == 'Inactivo' %}selected{% endif %}>Inactivo</option>
 						</select>
@@ -162,7 +166,7 @@
 </table>
 </div>
 
-{% if can_edit %}
+{% if can_edit and can_manage_catalog %}
 <div class="inventory-create-toggle-wrap">
 	<button type="button" class="toggle-panel-btn" data-target="inventory-create-panel">Crear (+)</button>
 </div>

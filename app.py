@@ -5,6 +5,8 @@ import re
 import secrets
 import uuid
 import hmac
+import unicodedata
+from operational import register_operations, is_warehouse
 from io import BytesIO
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -32,6 +34,8 @@ from database import (
 	Categoria,
 	Unidad,
 	Area,
+	AreaSede,
+	AreaSedeRol,
 	Subarea,
 	Usuario,
 	Producto,
@@ -68,6 +72,12 @@ def _get_operation_date():
 
 
 def _get_selected_app_date():
+    pinned_date = request.headers.get('X-Operation-Date', '').strip()
+    if pinned_date:
+        try:
+            return datetime.strptime(pinned_date, '%Y-%m-%d').date()
+        except ValueError:
+            abort(400)
     selected_date = session.get('app_date', '').strip()
     if not selected_date:
         operation_date = _get_operation_date().date()
@@ -424,11 +434,29 @@ def _inventory_dashboard_metrics(user, selected_date):
 	}
 
 
+def _sync_master_stock_rows():
+	"""Materialize shared catalog membership without changing independent stocks."""
+	db.session.flush()
+	known = {(r.id_sede, r.id_producto) for r in InventarioSede.query.all()}
+	products = Producto.query.filter(or_(Producto.estado.is_(None), Producto.estado != 'Inactivo')).all()
+	for site in Sede.query.all():
+		for product in products:
+			if (site.id_sede, product.id_producto) not in known:
+				db.session.add(InventarioSede(id_sede=site.id_sede, id_producto=product.id_producto, stock_actual=0, punto_minimo=0))
+
+
 def _inventory_query_for_user(user, q='', categoria='', subarea='', unidad='', area=''):
 	query = db.session.query(Producto, InventarioSede, Sede).join(
 		InventarioSede,
 		Producto.id_producto == InventarioSede.id_producto,
 	).join(Sede, Sede.id_sede == InventarioSede.id_sede)
+
+	if user.rol_nombre != 'admin_general':
+		query = query.filter(InventarioSede.id_sede == user.id_sede)
+	else:
+		selected_sede = request.args.get('id_sede', type=int) if request else None
+		query = query.filter(InventarioSede.id_sede == (selected_sede or user.id_sede))
+	query = query.filter(Producto.estado != 'Inactivo')
 
 	if q:
 		like_q = f"%{q}%"
@@ -848,6 +876,11 @@ def _calc_cierre_operativo(monto_inicial, pos_tarjetas, yape, plin, efectivo, ve
 	}
 
 
+def _slugify(value):
+	value = unicodedata.normalize('NFKD', str(value or '')).encode('ascii', 'ignore').decode()
+	return re.sub(r'[^a-z0-9]+', '_', value.lower()).strip('_')
+
+
 def _normalize_header(text):
 	if text is None:
 		return ''
@@ -954,19 +987,7 @@ def _get_checklist_items(pedido, user=None, include_all=False, target_user_id=''
 
 
 def _get_checklist_catalog(user, q='', id_sede=None):
-	# Usar solo el inventario central (Almacen) como fuente única de productos para
-	# el catálogo del checklist, evitando duplicados cuando hay inventarios por sede.
-	almacen = Sede.query.filter(db.func.lower(Sede.nombre_sede) == 'almacen').first()
-	if almacen:
-		# Obtener los id_producto presentes en el inventario del almacen
-		prod_ids = [r for (r,) in InventarioSede.query.with_entities(InventarioSede.id_producto).filter_by(id_sede=almacen.id_sede).all()]
-		query = Producto.query.filter(Producto.id_producto.in_(prod_ids))
-	else:
-		# Fallback: unir a InventarioSede sin filtrar por sede (antiguo comportamiento)
-		query = Producto.query.join(
-			InventarioSede,
-			InventarioSede.id_producto == Producto.id_producto,
-		).distinct()
+	query = Producto.query.filter(Producto.estado != 'Inactivo')
 	if q:
 		like_q = f"%{q}%"
 		query = query.filter(
@@ -1021,6 +1042,11 @@ def _get_checklist_catalog(user, q='', id_sede=None):
 
 
 def _preferred_area_for_user(user):
+	assigned = db.session.query(Area.nombre_area).join(AreaSedeRol, AreaSedeRol.id_area == Area.id_area).filter(
+		AreaSedeRol.id_sede == user.id_sede, AreaSedeRol.id_rol == user.id_rol,
+	).order_by(Area.nombre_area).first()
+	if assigned:
+		return assigned[0]
 	return _preferred_area_for_role_name(user.rol_nombre)
 
 
@@ -1033,13 +1059,12 @@ def _preferred_area_for_role_name(role_name):
 
 
 def _checklist_scope_users(user):
-	allowed_roles = {'cocinero', 'admin_sala'}
 	preferred_area = _preferred_area_for_user(user)
 	users = Usuario.query.join(Rol, Rol.id_rol == Usuario.id_rol).filter(
 		Usuario.id_sede == user.id_sede,
 		Usuario.id_turno == user.id_turno,
-		Rol.nombre_rol.in_(allowed_roles),
 	).all()
+	users = [scope_user for scope_user in users if scope_user.can_view('checklist')]
 	if preferred_area:
 		users = [scope_user for scope_user in users if _preferred_area_for_user(scope_user) == preferred_area]
 	if not users:
@@ -1305,6 +1330,10 @@ def _ensure_inventory_schema(app):
 			connection.execute(text('ALTER TABLE productos ADD COLUMN costo_unitario FLOAT DEFAULT 0'))
 
 	detalle_columns = {column['name'] for column in inspector.get_columns('detalle_pedido')}
+	for column_name in ('area_destino', 'rol_solicitante'):
+		if column_name not in detalle_columns:
+			with db.engine.begin() as connection:
+				connection.execute(text(f'ALTER TABLE detalle_pedido ADD COLUMN {column_name} VARCHAR(50)'))
 	if 'id_usuario' not in detalle_columns:
 		with db.engine.begin() as connection:
 			connection.execute(text('ALTER TABLE detalle_pedido ADD COLUMN id_usuario VARCHAR(50)'))
@@ -1528,8 +1557,12 @@ def create_app():
 				flash('Sesión o token de seguridad inválido. Por favor intenta de nuevo.', 'error')
 				return redirect(request.referrer or url_for('dashboard'))
 
+	register_operations(app, _get_csrf_token)
+
 	@app.after_request
 	def disable_browser_cache(response):
+		if current_user.is_authenticated:
+			response.headers['X-App-User'] = current_user.id_usuario
 		response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
 		response.headers['Pragma'] = 'no-cache'
 		response.headers['Expires'] = '0'
@@ -1542,6 +1575,8 @@ def create_app():
 		db.create_all()
 		_ensure_inventory_schema(app)
 		_seed_catalogs()
+		_sync_master_stock_rows()
+		db.session.commit()
 		print('Base de datos vinculada y tablas creadas.')
 
 	@app.get('/health')
@@ -1733,10 +1768,29 @@ def create_app():
 				return _forbidden_redirect()
 
 			action = request.form.get('action', 'update_row')
+			if action != 'upsert_product' and current_user.rol_nombre != 'admin_general' and not is_warehouse(current_user.sede):
+				abort(403)
 			id_producto = request.form.get('id_producto', '').strip()
 			target_sede = current_user.id_sede if current_user.rol_nombre != 'admin_general' else _form_record_id('id_sede', current_user.id_sede)
 
 			if action == 'upsert_product':
+				if current_user.rol_nombre != 'admin_general' and not is_warehouse(current_user.sede):
+					producto = db.session.get(Producto, id_producto)
+					if not producto or not target_sede:
+						abort(403)
+					row = db.session.get(InventarioSede, (target_sede, id_producto))
+					if not row:
+						row = InventarioSede(id_sede=target_sede, id_producto=id_producto, stock_actual=0, punto_minimo=0)
+						db.session.add(row)
+					previous = float(row.stock_actual or 0)
+					row.stock_actual = _safe_float(request.form.get('stock_actual'), previous)
+					row.punto_minimo = _safe_float(request.form.get('punto_minimo'), row.punto_minimo or 0)
+					delta = row.stock_actual - previous
+					if delta:
+						db.session.add(MovimientoInventario(id_sede=target_sede, id_producto=id_producto, cantidad=abs(delta), tipo='ENTRADA' if delta > 0 else 'SALIDA', motivo='Ajuste inventario sede', id_usuario=current_user.id_usuario))
+					db.session.commit()
+					flash('Stock de sede actualizado.', 'ok')
+					return redirect(url_for('inventario'))
 				if not id_producto:
 					id_producto = _generate_product_id()
 
@@ -1778,46 +1832,19 @@ def create_app():
 							id_usuario=current_user.id_usuario,
 						)
 					)
+				_sync_master_stock_rows()
 				db.session.commit()
 				flash('Producto guardado en inventario.', 'ok')
 
 			elif action == 'delete_product':
-				row = InventarioSede.query.filter_by(id_sede=target_sede, id_producto=id_producto).first()
-				if row:
-					db.session.delete(row)
-					# Asegurarse que la eliminación pendiente se flushee antes de verificar filas restantes
-					db.session.flush()
-					PlantillaChecklistItem.query.filter_by(id_sede=target_sede, id_producto=id_producto).delete(synchronize_session=False)
-					open_pedido_ids = [
-						pedido_id
-						for (pedido_id,) in db.session.query(ChecklistPedido.id_pedido).filter(
-							ChecklistPedido.id_sede == target_sede,
-							ChecklistPedido.estado_general.in_(['Borrador', 'Pendiente', 'Enviado']),
-						).all()
-					]
-					if open_pedido_ids:
-						DetallePedido.query.filter(
-							DetallePedido.id_pedido.in_(open_pedido_ids),
-							DetallePedido.id_producto == id_producto,
-						).delete(synchronize_session=False)
-					# Eliminar movimientos asociados antes de borrar el producto para evitar errores de FK
-					MovimientoInventario.query.filter_by(id_producto=id_producto).delete(synchronize_session=False)
-					# Si no quedan registros de inventario para este producto, entonces eliminar el producto
-					if InventarioSede.query.filter_by(id_producto=id_producto).count() == 0:
-						PlantillaChecklistItem.query.filter_by(id_producto=id_producto).delete(synchronize_session=False)
-						DetallePedido.query.filter_by(id_producto=id_producto).delete(synchronize_session=False)
-						producto = Producto.query.filter_by(id_producto=id_producto).first()
-						if producto:
-							db.session.delete(producto)
-					try:
-						db.session.commit()
-					except IntegrityError as exc:
-						db.session.rollback()
-						flash(f'Error al eliminar producto: {exc}', 'error')
-					else:
-						flash('Producto eliminado del inventario.', 'ok')
-				else:
-					flash('No se encontro el producto en esa sede.', 'error')
+				if current_user.rol_nombre != 'admin_general' and not is_warehouse(current_user.sede):
+					abort(403)
+				producto = db.session.get(Producto, id_producto)
+				if producto:
+					producto.estado = 'Inactivo'
+					PlantillaChecklistItem.query.filter_by(id_producto=id_producto).delete(synchronize_session=False)
+					db.session.commit()
+					flash('Producto retirado del catálogo de todas las sedes. Historial conservado.', 'ok')
 
 			elif action == 'create_category':
 				nombre_categoria = request.form.get('nombre_categoria', '').strip()
@@ -1857,31 +1884,8 @@ def create_app():
 				else:
 					flash('El area ya existe o esta vacia.', 'error')
 
-			elif action == 'delete_product':
-				# Borrado en cascada: eliminar todo inventario y movimientos del producto a nivel global
-				any_row = InventarioSede.query.filter_by(id_sede=target_sede, id_producto=id_producto).first()
-				if any_row:
-					# eliminar movimientos históricos del producto
-					MovimientoInventario.query.filter_by(id_producto=id_producto).delete(synchronize_session=False)
-					# eliminar todas las filas de inventario para este producto en todas las sedes
-					InventarioSede.query.filter_by(id_producto=id_producto).delete(synchronize_session=False)
-					# eliminar referencias en plantillas
-					PlantillaChecklistItem.query.filter_by(id_producto=id_producto).delete(synchronize_session=False)
-					# eliminar detalles de pedidos asociados
-					DetallePedido.query.filter_by(id_producto=id_producto).delete(synchronize_session=False)
-					# eliminar producto
-					producto = Producto.query.filter_by(id_producto=id_producto).first()
-					if producto:
-						db.session.delete(producto)
-					try:
-						db.session.commit()
-					except IntegrityError as exc:
-						db.session.rollback()
-						flash(f'Error al eliminar producto: {exc}', 'error')
-					else:
-						flash('Producto y sus registros relacionados fueron eliminados.', 'ok')
-				else:
-					flash('No se encontro el producto en esa sede.', 'error')
+		_sync_master_stock_rows()
+		db.session.commit()
 
 		q = request.args.get('q', '').strip()
 		categoria = request.args.get('categoria', '').strip()
@@ -1913,6 +1917,8 @@ def create_app():
 			category_counts=category_counts,
 			unit_counts=unit_counts,
 			subareas=subareas,
+			stock_sedes=Sede.query.all(),
+			selected_stock_sede=request.args.get('id_sede', type=int) or current_user.id_sede,
 			selected_q=q,
 			selected_categoria=categoria,
 			selected_area=area,
@@ -1920,6 +1926,7 @@ def create_app():
 			selected_unidad=unidad,
 			areas_subareas={area.nombre_area: _get_subareas_for_area(area.nombre_area) for area in areas},
 			can_edit=current_user.can_write('inventario', 'update'),
+			can_manage_catalog=current_user.rol_nombre == 'admin_general' or is_warehouse(current_user.sede),
 		)
 
 	@app.route('/inventario/export')
@@ -1968,6 +1975,8 @@ def create_app():
 	@app.route('/inventario/import', methods=['POST'])
 	@login_required
 	def inventario_import():
+		if current_user.rol_nombre != 'admin_general' and not is_warehouse(current_user.sede):
+			abort(403)
 		if not current_user.can_write('inventario', 'update'):
 			return _forbidden_redirect()
 
@@ -2178,6 +2187,7 @@ def create_app():
 			if not sedes_objetivo:
 				sedes_objetivo.add(current_user.id_sede)
 
+			_sync_master_stock_rows()
 			db.session.commit()
 		except Exception as exc:
 			db.session.rollback()
@@ -2365,7 +2375,7 @@ def create_app():
 			return _forbidden_redirect()
 		selected_date = _get_selected_app_date()
 		can_update = current_user.can_write('pedidos', 'update')
-		can_delete_requested = current_user.rol_nombre in {'admin_general', 'admin_almacen'}
+		can_delete_requested = current_user.can_write('pedidos', 'delete')
 
 		pedido_id_raw = request.args.get('pedido_id', '').strip()
 		pedido_id = int(pedido_id_raw) if pedido_id_raw.isdigit() else None
@@ -2412,6 +2422,8 @@ def create_app():
 					return _pedidos_post_response(request.form.get('pedido_id'))
 
 				pedido = ChecklistPedido.query.get(detalle.id_pedido)
+				if current_user.rol_nombre not in {'admin_general', 'admin_almacen', 'personal_prod'} and pedido.id_sede != current_user.id_sede:
+					abort(403)
 				cantidad = _safe_float(request.form.get('cantidad_entregada'), detalle.cantidad_pedida or 0.0)
 				cantidad = max(cantidad, 0.0)
 				checked = request.form.get('enviar_linea') == 'on'
@@ -2514,6 +2526,8 @@ def create_app():
 		if pedido_id is not None:
 			selected_pedido = ChecklistPedido.query.get(pedido_id)
 			if selected_pedido:
+				if current_user.rol_nombre not in {'admin_general', 'admin_almacen', 'personal_prod'} and selected_pedido.id_sede != current_user.id_sede:
+					abort(403)
 				selected_items_query = db.session.query(DetallePedido, Producto).join(
 					Producto, Producto.id_producto == DetallePedido.id_producto
 				).filter(
@@ -2527,7 +2541,11 @@ def create_app():
 							DetallePedido.id_usuario.is_(None),
 						)
 					)
-				selected_items = selected_items_query.order_by(Producto.nombre_producto.asc()).all()
+				selected_items = selected_items_query.order_by(Producto.id_area.asc(), db.func.lower(Producto.nombre_producto).asc()).all()
+				for detail, product in selected_items:
+					owner = db.session.get(Usuario, detail.id_usuario or selected_pedido.id_usuario)
+					detail.rol_solicitante = detail.rol_solicitante or (owner.rol_nombre if owner else 'Sin rol')
+					detail.area_destino = detail.area_destino or product.area or 'Sin área'
 
 				# Nombre legible de sede/turno para la UI de impresión
 				if selected_pedido:
@@ -2585,6 +2603,14 @@ def create_app():
 			DetallePedido.id_pedido == pedido.id_pedido,
 			DetallePedido.cantidad_pedida > 0,
 		).order_by(Producto.nombre_producto.asc()).all()
+		selected_ids = request.args.getlist('selected', type=int)
+		if selected_ids:
+			items = [(d, p) for d, p in items if d.id_detalle in selected_ids]
+		items.sort(key=lambda pair: ((pair[1].id_area or '').casefold(), pair[1].nombre_producto.casefold()))
+		for detail, product in items:
+			owner = db.session.get(Usuario, detail.id_usuario or pedido.id_usuario)
+			detail.rol_solicitante = detail.rol_solicitante or (owner.rol_nombre if owner else 'Sin rol')
+			detail.area_destino = detail.area_destino or product.area or 'Sin área'
 		sede = db.session.get(Sede, pedido.id_sede) if pedido.id_sede else None
 		turno = db.session.get(Turno, pedido.id_turno) if pedido.id_turno else None
 		return render_template(
@@ -2603,13 +2629,13 @@ def create_app():
 			return _forbidden_redirect()
 		selected_date = _get_selected_app_date()
 		is_admin_general = current_user.rol_nombre == 'admin_general'
-		selected_pedido_raw = request.args.get('pedido_id', '').strip()
+		selected_pedido_raw = request.values.get('pedido_id', '').strip()
 		selected_pedido_id = int(selected_pedido_raw) if selected_pedido_raw.isdigit() else None
 		checklist_selector_options = []
-		selected_filter_turno = request.args.get('f_turno', '').strip()
-		selected_filter_sede = request.args.get('f_sede', '').strip()
-		selected_filter_area = request.args.get('f_area', '').strip().lower()
-		selected_filter_user = request.args.get('f_user', '').strip()
+		selected_filter_turno = request.values.get('f_turno', '').strip()
+		selected_filter_sede = request.values.get('f_sede', '').strip()
+		selected_filter_area = request.values.get('f_area', '').strip().lower()
+		selected_filter_user = request.values.get('f_user', '').strip()
 		is_async_request = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
 		admin_turno_options = []
 		admin_sede_options = []
@@ -2621,7 +2647,10 @@ def create_app():
 		if not is_admin_general:
 			seeded_checklist = _build_checklist_from_template_if_needed(current_user, selected_date)
 			if seeded_checklist is not None:
-				db.session.commit()
+				if request.method == 'GET':
+					db.session.commit()
+				else:
+					db.session.flush()
 			scope_users = _checklist_scope_users(current_user)
 			checklist_user_options = [
 				{'id': scope_user.id_usuario, 'label': scope_user.username}
@@ -2642,7 +2671,7 @@ def create_app():
 				Usuario, Usuario.id_usuario == ChecklistPedido.id_usuario
 			).filter(
 				db.func.date(ChecklistPedido.fecha) == selected_date
-			).order_by(ChecklistPedido.id_pedido.desc()).limit(200).all()
+			).order_by(ChecklistPedido.id_pedido.desc()).all()
 
 			turno_map = {}
 			for _, _, turno, _ in admin_rows:
@@ -2701,8 +2730,6 @@ def create_app():
 				]
 				if selected_filter_area and selected_filter_area not in {option['id'] for option in admin_area_options}:
 					selected_filter_area = ''
-				if not selected_filter_area and admin_area_options:
-					selected_filter_area = admin_area_options[0]['id']
 
 				user_query = db.session.query(Usuario.id_usuario, Usuario.username).join(
 					DetallePedido, DetallePedido.id_usuario == Usuario.id_usuario
@@ -2720,10 +2747,8 @@ def create_app():
 				]
 				if selected_filter_user and selected_filter_user not in {option['id'] for option in admin_user_options}:
 					selected_filter_user = ''
-				if not selected_filter_user and admin_user_options:
-					selected_filter_user = admin_user_options[0]['id']
 
-			if visible_checklist and visible_checklist.estado_general in {'Borrador', 'Pendiente', 'Enviado'}:
+			if visible_checklist:
 				active_checklist = visible_checklist
 		else:
 			active_checklist = _get_active_checklist(current_user, selected_date)
@@ -2731,6 +2756,8 @@ def create_app():
 
 		if request.method == 'POST':
 			action = request.form.get('action', '').strip()
+			if action in {'qty_set', 'qty_plus', 'qty_minus', 'qty_clear', 'remove_item', 'remove_selected'} and not (current_user.can_write('checklist', 'update') or current_user.rol_nombre == 'cocinero'):
+				abort(403)
 			if not current_user.can_write('checklist', 'insert'):
 				return _forbidden_redirect()
 
@@ -2787,7 +2814,7 @@ def create_app():
 				)
 				if is_admin_general and selected_filter_user:
 					detail_query = detail_query.filter_by(id_usuario=selected_filter_user)
-				else:
+				elif not is_admin_general:
 					detail_query = detail_query.filter_by(id_usuario=current_user.id_usuario)
 				return detail_query.first()
 
@@ -2855,7 +2882,7 @@ def create_app():
 						_sync_open_checklists_with_template(current_user, selected_date)
 
 			elif action == 'qty_plus':
-				if not active_checklist or active_checklist.estado_general not in {'Borrador', 'Pendiente'}:
+				if not active_checklist or (not is_admin_general and active_checklist.estado_general not in {'Borrador', 'Pendiente'}):
 					flash('La lista ya fue enviada.', 'error')
 				else:
 					detalle = _get_target_detail()
@@ -2863,7 +2890,7 @@ def create_app():
 						detalle.cantidad_pedida = max((detalle.cantidad_pedida or 0.0) + 1.0, 0.0)
 
 			elif action == 'qty_minus':
-				if not active_checklist or active_checklist.estado_general not in {'Borrador', 'Pendiente'}:
+				if not active_checklist or (not is_admin_general and active_checklist.estado_general not in {'Borrador', 'Pendiente'}):
 					flash('La lista ya fue enviada.', 'error')
 				else:
 					detalle = _get_target_detail()
@@ -2873,7 +2900,7 @@ def create_app():
 							detalle.cantidad_pedida = actual - 1.0
 
 			elif action == 'qty_clear':
-				if not active_checklist or active_checklist.estado_general not in {'Borrador', 'Pendiente'}:
+				if not active_checklist or (not is_admin_general and active_checklist.estado_general not in {'Borrador', 'Pendiente'}):
 					flash('La lista ya fue enviada.', 'error')
 				else:
 					detalle = _get_target_detail()
@@ -2881,7 +2908,7 @@ def create_app():
 						detalle.cantidad_pedida = 0.0
 
 			elif action == 'qty_set':
-				if not active_checklist or active_checklist.estado_general not in {'Borrador', 'Pendiente'}:
+				if not active_checklist or (not is_admin_general and active_checklist.estado_general not in {'Borrador', 'Pendiente'}):
 					flash('La lista ya fue enviada.', 'error')
 				else:
 					detalle = _get_target_detail()
@@ -2890,7 +2917,7 @@ def create_app():
 						detalle.cantidad_pedida = cantidad
 
 			elif action == 'remove_item':
-				if not active_checklist or active_checklist.estado_general not in {'Borrador', 'Pendiente'}:
+				if not active_checklist or (not is_admin_general and active_checklist.estado_general not in {'Borrador', 'Pendiente'}):
 					flash('La lista ya fue enviada.', 'error')
 				else:
 					detalle = _get_target_detail()
@@ -3612,6 +3639,9 @@ def create_app():
 			if f_turno:
 				target_turno_id = f_turno
 
+		if is_warehouse(db.session.get(Sede, target_sede_id)):
+			abort(403, description='Arqueo de caja no disponible en Almacén.')
+
 		if not target_sede_id or not target_turno_id:
 			flash('No se puede abrir arqueo sin sede y turno definidos.', 'error')
 			return redirect(url_for('dashboard'))
@@ -3717,7 +3747,7 @@ def create_app():
 		target_sede = Sede.query.get(target_sede_id)
 		target_turno = Turno.query.get(target_turno_id)
 		if is_admin_general:
-			sedes_disponibles = Sede.query.order_by(Sede.nombre_sede.asc()).all()
+			sedes_disponibles = [s for s in Sede.query.order_by(Sede.nombre_sede.asc()).all() if not is_warehouse(s)]
 			turnos_disponibles = Turno.query.order_by(Turno.nombre_turno.asc()).all()
 
 		return render_template(
@@ -4372,6 +4402,7 @@ def create_app():
 					return redirect(url_for('ajustes'))
 				in_use = any((
 					Usuario.query.filter_by(id_sede=sede_id).first(),
+					AreaSede.query.filter_by(id_sede=sede_id).first(),
 					InventarioSede.query.filter_by(id_sede=sede_id).first(),
 					ChecklistPedido.query.filter_by(id_sede=sede_id).first(),
 					ArqueoCaja.query.filter_by(id_sede=sede_id).first(),
@@ -4551,6 +4582,8 @@ def create_app():
 					return redirect(url_for('ajustes'))
 				sede.monto_inicial_base_esperado = valor_f
 
+			if tipo_form == 'sede':
+				_sync_master_stock_rows()
 			db.session.commit()
 			flash('Configuracion guardada.', 'ok')
 

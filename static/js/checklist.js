@@ -17,6 +17,7 @@ document.addEventListener('change', (event) => {
 async function submitFormAsync(form, formData) {
 	const targetUrl = form.getAttribute('action') || window.location.href;
 	const targetMethod = (form.getAttribute('method') || 'POST').toUpperCase();
+	if (window.LocalFirst) return window.LocalFirst.save(targetUrl, { method: targetMethod, body: formData });
 	const response = await fetch(targetUrl, {
 		method: targetMethod,
 		body: formData,
@@ -155,6 +156,11 @@ function bindChecklistAsyncForms() {
 					rollback = () => updateQtyVisualInCounterForm(form, currentQty);
 					updateQtyVisualInCounterForm(form, nextQty);
 				}
+				if (window.LocalFirst) {
+					formData.set('action', 'qty_set');
+					formData.set('cantidad_pedida', String(nextQty));
+					formData.set('expected_qty', String(currentQty));
+				}
 			}
 
 			if (form.classList.contains('qty-inline-form')) {
@@ -165,6 +171,7 @@ function bindChecklistAsyncForms() {
 					const counterForm = id ? form.parentElement.querySelector('.qty-counter-form') : null;
 					if (counterForm) {
 						const currentQty = getCurrentQtyFromCounterForm(counterForm);
+						if (window.LocalFirst) formData.set('expected_qty', String(currentQty));
 						rollback = () => updateQtyVisualInCounterForm(counterForm, currentQty);
 						updateQtyVisualInCounterForm(counterForm, nextQty);
 					}
@@ -235,6 +242,11 @@ function bindChecklistAsyncForms() {
 
 			// Si se envió la lista, mostrar modal con resumen de productos enviados
 			if (form.classList.contains('send-wrap')) {
+				if (window.LocalFirst) {
+					const button = form.querySelector('button');
+					if (button) { button.disabled = true; button.textContent = 'Envío pendiente de sincronización'; }
+					return;
+				}
 				try {
 					const card = form.closest('.check-card');
 					const header = card ? card.querySelector('.check-header-row strong') : null;
@@ -579,11 +591,14 @@ function bindTemplateImportTrigger() {
 			fileInput.click();
 		});
 
-		fileInput.addEventListener('change', () => {
+		fileInput.addEventListener('change', async () => {
 			if (!fileInput.files || fileInput.files.length === 0) {
 				return;
 			}
-			form.submit();
+			try {
+				if (window.LocalFirst) await window.LocalFirst.refreshToken();
+				form.requestSubmit();
+			} catch (error) { window.LocalFirst?.toast(error.message || 'Conéctate para importar la plantilla.'); }
 		});
 	}
 }

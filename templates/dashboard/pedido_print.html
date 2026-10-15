@@ -23,13 +23,13 @@
     <h2>Enviando</h2>
     <table>
         {% for detalle, producto in items if (detalle.cantidad_entregada or 0) > 0 %}
-        <tr><td>{{ producto.nombre_producto }}</td><td>{{ '%g'|format(detalle.cantidad_entregada) }} {{ producto.unidad or '' }}</td></tr>
+        <tr><td>{{ producto.nombre_producto }}<br><small>{{ producto.id_area or "Sin categoría" }} · Destino: {{ detalle.area_destino|title }} · Rol: {{ detalle.rol_solicitante }}</small></td><td>{{ '%g'|format(detalle.cantidad_entregada) }} {{ producto.unidad or '' }}</td></tr>
         {% else %}<tr><td>No hay productos enviados.</td><td></td></tr>{% endfor %}
     </table>
     <h2>No enviado por falta de stock</h2>
     <table>
         {% for detalle, producto in items if (detalle.cantidad_entregada or 0) <= 0 %}
-        <tr><td>{{ producto.nombre_producto }}</td><td>{{ '%g'|format(detalle.cantidad_pedida or 0) }} {{ producto.unidad or '' }}</td></tr>
+        <tr><td>{{ producto.nombre_producto }}<br><small>{{ producto.id_area or "Sin categoría" }} · Destino: {{ detalle.area_destino|title }} · Rol: {{ detalle.rol_solicitante }}</small></td><td>{{ '%g'|format(detalle.cantidad_pedida or 0) }} {{ producto.unidad or '' }}</td></tr>
         {% else %}<tr><td>No hay productos pendientes.</td><td></td></tr>{% endfor %}
     </table>
     <div class="signatures"><div class="signature">Enviado por</div><div class="signature">Recibido por</div></div>

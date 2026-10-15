@@ -1,7 +1,7 @@
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import UserMixin
 from datetime import datetime
-from sqlalchemy import UniqueConstraint
+from sqlalchemy import UniqueConstraint, event, select
 
 db = SQLAlchemy()
 
@@ -20,6 +20,45 @@ class Rol(db.Model):
 	__tablename__ = 'roles'
 	id_rol = db.Column(db.Integer, primary_key=True)
 	nombre_rol = db.Column(db.String(50), nullable=False)  # admin_general, cocinero, etc.
+
+
+class PermisoRol(db.Model):
+	__tablename__ = 'permisos_rol'
+	id_rol = db.Column(db.Integer, db.ForeignKey('roles.id_rol'), primary_key=True)
+	modulo = db.Column(db.String(40), primary_key=True)
+	lectura = db.Column(db.Boolean, nullable=False, default=False)
+	escritura = db.Column(db.Boolean, nullable=False, default=False)
+
+
+class AreaSedeRol(db.Model):
+	__tablename__ = 'areas_sede_roles'
+	id_sede = db.Column(db.Integer, db.ForeignKey('sedes.id_sede'), primary_key=True)
+	id_area = db.Column(db.Integer, db.ForeignKey('areas.id_area'), primary_key=True)
+	# A row without role is represented by a separate AreaSede record.
+	id_rol = db.Column(db.Integer, db.ForeignKey('roles.id_rol'), primary_key=True)
+
+
+class AreaSede(db.Model):
+	__tablename__ = 'areas_sede'
+	id_sede = db.Column(db.Integer, db.ForeignKey('sedes.id_sede'), primary_key=True)
+	id_area = db.Column(db.Integer, db.ForeignKey('areas.id_area'), primary_key=True)
+
+
+class OperacionLocal(db.Model):
+	__tablename__ = 'operaciones_locales'
+	id = db.Column(db.String(80), primary_key=True)
+	id_usuario = db.Column(db.String(50), nullable=False)
+	huella = db.Column(db.String(64), nullable=False)
+	creado_en = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class EventoSistema(db.Model):
+	__tablename__ = 'eventos_sistema'
+	id = db.Column(db.Integer, primary_key=True)
+	modulo = db.Column(db.String(40), nullable=False)
+	id_sede = db.Column(db.Integer)
+	id_usuario = db.Column(db.String(50))
+	creado_en = db.Column(db.DateTime, default=datetime.utcnow)
 
 
 class Turno(db.Model):
@@ -101,6 +140,13 @@ class Usuario(UserMixin, db.Model):
 		return self.turno.nombre_turno if self.turno else ''
 
 	def can_view(self, vista):
+		if vista == 'arqueo' and self.rol_nombre != 'admin_general' and self.sede and self.sede.nombre_sede.strip().casefold() in {'almacen', 'almacén'}:
+			return False
+		if self.rol_nombre == 'admin_general':
+			return True
+		custom = db.session.get(PermisoRol, (self.id_rol, vista)) if self.id_rol else None
+		if custom is not None:
+			return custom.lectura
 		permissions = {
 			'admin_general': {'inventario', 'movimientos', 'pedidos', 'checklist', 'arqueo', 'ajustes', 'mermas', 'incidencias', 'horarios', 'dashboard'},
 			'admin_almacen': {'inventario', 'movimientos', 'pedidos', 'horarios', 'dashboard'},
@@ -111,6 +157,13 @@ class Usuario(UserMixin, db.Model):
 		return vista in permissions.get(self.rol_nombre, set())
 
 	def can_write(self, modulo, action='insert'):
+		if not self.can_view(modulo):
+			return False
+		if self.rol_nombre == 'admin_general':
+			return True
+		custom = db.session.get(PermisoRol, (self.id_rol, modulo)) if self.id_rol else None
+		if custom is not None:
+			return custom.escritura and action in {'insert', 'update', 'delete'}
 		full = {'insert', 'update', 'delete'}
 		write_rules = {
 			'admin_general': {
@@ -195,6 +248,19 @@ class DetallePedido(db.Model):
 	cantidad_pedida = db.Column(db.Float, nullable=False)
 	cantidad_entregada = db.Column(db.Float, default=0.0)
 	estado_sede = db.Column(db.String(20), default='Pendiente')
+	area_destino = db.Column(db.String(50))
+	rol_solicitante = db.Column(db.String(50))
+
+
+@event.listens_for(DetallePedido, 'before_insert')
+def _snapshot_request_metadata(mapper, connection, detail):
+	if not detail.area_destino:
+		detail.area_destino = connection.execute(select(Producto.area).where(Producto.id_producto == detail.id_producto)).scalar() or ''
+	if not detail.rol_solicitante:
+		owner_id = detail.id_usuario
+		if not owner_id:
+			owner_id = connection.execute(select(ChecklistPedido.id_usuario).where(ChecklistPedido.id_pedido == detail.id_pedido)).scalar()
+		detail.rol_solicitante = connection.execute(select(Rol.nombre_rol).join(Usuario, Usuario.id_rol == Rol.id_rol).where(Usuario.id_usuario == owner_id)).scalar() or ''
 
 
 class PlantillaChecklistItem(db.Model):

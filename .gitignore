@@ -17,3 +17,4 @@ reporte_*.csv
 .pytest_cache/
 .coverage
 htmlcov/
+.codex-test-deps/

@@ -35,7 +35,12 @@
 		<p class="muted">Ajusta cantidad de envío (por defecto sale la pedida) y marca checkbox por línea.</p>
 
 		<div class="pedidos-lines">
+			{% set category = namespace(previous=none) %}
 			{% for detalle, producto in selected_items %}
+			{% if category.previous != (producto.id_area or 'Sin categoría') %}
+			<h4 class="category-subtitle">{{ producto.id_area or 'Sin categoría' }}</h4>
+			{% set category.previous = producto.id_area or 'Sin categoría' %}
+			{% endif %}
 			{% set qty_envio = detalle.cantidad_entregada if (detalle.cantidad_entregada or 0) > 0 else detalle.cantidad_pedida %}
 			{% set qty_pedida_text = '%g'|format(detalle.cantidad_pedida or 0) %}
 			{% set qty_envio_text = '%g'|format(qty_envio or 0) %}
@@ -49,6 +54,7 @@
 					<input class="pedidos-line-check" type="checkbox" name="enviar_linea" {% if (detalle.cantidad_entregada or 0) > 0 %}checked{% endif %}>
 					<span class="pedido-line-text">
 						<strong class="pedido-line-name">{{ producto.nombre_producto }}</strong>
+						<small>Destino: {{ detalle.area_destino|title }} · Solicitó: {{ detalle.rol_solicitante }}</small>
 						<small class="pedido-line-meta">{{ producto.unidad or 'unidad' }} | pedido: {{ qty_pedida_text }}</small>
 						{% if (detalle.cantidad_entregada or 0) > 0 and detalle.estado_sede == 'Recibido' %}
 						<small class="pedido-line-status ok">Cocina confirmo recepcion: {{ qty_enviada_text }}</small>

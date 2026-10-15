@@ -2,6 +2,7 @@
 {% block title %}Ajustes{% endblock %}
 {% block content %}
 <h1>Ajustes del sistema</h1>
+{% if current_user.rol_nombre == "admin_general" %}<a class="btn-outline" href="{{ url_for('permisos') }}">Roles, áreas y permisos</a>{% endif %}
 
 <style>
 	.settings-edit-row:target {
