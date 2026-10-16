@@ -1,7 +1,7 @@
 # Cambios operativos
 
 La versión publicada aparece al pie de la barra lateral y se define en el archivo
-`VERSION` (actualmente `1.0.3`). Se lee una sola vez al arrancar la aplicación.
+`VERSION` (actualmente `1.0.4`). Se lee una sola vez al arrancar la aplicación.
 
 El catálogo usa una sola fila `Producto` por ID. Almacén y Admin General administran
 sus atributos; cada sede conserva `InventarioSede.stock_actual` y `punto_minimo`.
