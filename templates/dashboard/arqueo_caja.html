@@ -48,6 +48,7 @@
 {% set delivered_locked = cierre and cierre.efectivo_entregado_guardado and not is_admin_general %}
 {% set left_locked = cierre and cierre.efectivo_dejado_guardado and not is_admin_general %}
 {% set locked_fields_json = locked_fields|default([])|tojson %}
+{% set draft_fields = draft_fields|default([]) %}
 {% if can_insert or can_update %}
 <form method="POST" class="card cierre-caja-form" onsubmit="return false;">
 	<input type="hidden" name="section" value="section1">
@@ -56,7 +57,7 @@
 	<fieldset>
 	<div>
 		<label>Monto Base Colocado (entrada manual)</label>
-		<input type="number" step="0.01" name="monto_inicial" value="{% if cierre and ('monto_inicial' in locked_fields or is_admin_general or is_historical) and cierre.monto_inicial is not none %}{{ '%.2f'|format(cierre.monto_inicial) }}{% endif %}" placeholder="0.00">
+		<input type="number" step="0.01" name="monto_inicial" value="{% if cierre and ('monto_inicial' in locked_fields or 'monto_inicial' in draft_fields or is_admin_general or is_historical) and cierre.monto_inicial is not none %}{{ '%.2f'|format(cierre.monto_inicial) }}{% endif %}" placeholder="0.00">
 		{% if expected_base is defined %}
 			<div class="muted">Monto inicial base esperado (config): {{ '%.2f'|format(expected_base) }}</div>
 		{% endif %}
@@ -77,7 +78,7 @@
 					{% endfor %}
 				</select>
 				<input type="text" name="gasto_nombre[]" value="{{ g.nombre }}" placeholder="Nombre del gasto" {% if is_locked %}disabled{% endif %}>
-				<input type="number" step="0.01" name="gasto_monto[]" value="{{ g.monto }}" placeholder="Monto" data-prev-monto="{{ g.monto }}" {% if is_locked and (not is_propina or not propina_increment_allowed) %}disabled{% endif %} {% if is_locked and is_propina and propina_increment_allowed %}min="{{ g.monto }}" title="La propina solo puede aumentarse hasta el cierre definitivo (mínimo {{ g.monto }})"{% endif %}>
+				<input type="number" step="0.01" name="gasto_monto[]" value="{{ g.monto if g.monto is not none else '' }}" placeholder="Monto" data-prev-monto="{{ g.monto }}" {% if is_locked and (not is_propina or not propina_increment_allowed) %}disabled{% endif %} {% if is_locked and is_propina and propina_increment_allowed %}min="{{ g.monto }}" title="La propina solo puede aumentarse hasta el cierre definitivo (mínimo {{ g.monto }})"{% endif %}>
 				{% if is_admin_general or not is_locked %}
 				<button type="button" class="btn-danger remove-gasto">Eliminar</button>
 				{% elif is_propina and propina_increment_allowed %}
@@ -112,33 +113,33 @@
 			<label class="canal-label" for="pos_tarjetas">POS (Tarjetas)</label>
 			<div class="canal-control">
 				<img class="canal-icon" src="{{ url_for('static', filename='img/visa.png') }}" alt="Tarjetas">
-				<input id="pos_tarjetas" type="number" step="0.01" name="pos_tarjetas" value="{% if cierre and ('pos_tarjetas' in locked_fields or is_admin_general or is_historical) and cierre.pos_tarjetas is not none %}{{ '%.2f'|format(cierre.pos_tarjetas) }}{% endif %}" placeholder="0.00">
+				<input id="pos_tarjetas" type="number" step="0.01" name="pos_tarjetas" value="{% if cierre and ('pos_tarjetas' in locked_fields or 'pos_tarjetas' in draft_fields or is_admin_general or is_historical) and cierre.pos_tarjetas is not none %}{{ '%.2f'|format(cierre.pos_tarjetas) }}{% endif %}" placeholder="0.00">
 			</div>
 		</div>
 		<div class="ingreso-canal-item">
 			<label class="canal-label" for="yape">Yape</label>
 			<div class="canal-control">
 				<img class="canal-icon" src="{{ url_for('static', filename='img/logo-yape.png') }}" alt="Yape">
-				<input id="yape" type="number" step="0.01" name="yape" value="{% if cierre and ('yape' in locked_fields or is_admin_general or is_historical) and cierre.yape is not none %}{{ '%.2f'|format(cierre.yape) }}{% endif %}" placeholder="0.00">
+				<input id="yape" type="number" step="0.01" name="yape" value="{% if cierre and ('yape' in locked_fields or 'yape' in draft_fields or is_admin_general or is_historical) and cierre.yape is not none %}{{ '%.2f'|format(cierre.yape) }}{% endif %}" placeholder="0.00">
 			</div>
 		</div>
 		<div class="ingreso-canal-item">
 			<label class="canal-label" for="plin">Plin</label>
 			<div class="canal-control">
 				<img class="canal-icon" src="{{ url_for('static', filename='img/logo-plin.png') }}" alt="Plin">
-				<input id="plin" type="number" step="0.01" name="plin" value="{% if cierre and ('plin' in locked_fields or is_admin_general or is_historical) and cierre.plin is not none %}{{ '%.2f'|format(cierre.plin) }}{% endif %}" placeholder="0.00">
+				<input id="plin" type="number" step="0.01" name="plin" value="{% if cierre and ('plin' in locked_fields or 'plin' in draft_fields or is_admin_general or is_historical) and cierre.plin is not none %}{{ '%.2f'|format(cierre.plin) }}{% endif %}" placeholder="0.00">
 			</div>
 		</div>
 		<div class="ingreso-canal-item">
 			<label class="canal-label" for="efectivo">Efectivo</label>
 			<div class="canal-control">
 				<img class="canal-icon" src="{{ url_for('static', filename='img/dinero-en-efectivo.png') }}" alt="Efectivo">
-				<input id="efectivo" type="number" step="0.01" name="efectivo" value="{% if cierre and ('efectivo' in locked_fields or is_admin_general or is_historical) and cierre.efectivo is not none %}{{ '%.2f'|format(cierre.efectivo) }}{% endif %}" placeholder="0.00">
+				<input id="efectivo" type="number" step="0.01" name="efectivo" value="{% if cierre and ('efectivo' in locked_fields or 'efectivo' in draft_fields or is_admin_general or is_historical) and cierre.efectivo is not none %}{{ '%.2f'|format(cierre.efectivo) }}{% endif %}" placeholder="0.00">
 			</div>
 		</div>
 	</div>
 	<label>Venta del sistema (POS)</label>
-	<input id="venta_sistema" type="number" step="0.01" name="venta_sistema" value="{% if cierre and ('venta_sistema' in locked_fields or cierre.venta_sistema_guardada or is_admin_general or is_historical) and cierre.venta_sistema is not none %}{{ '%.2f'|format(cierre.venta_sistema) }}{% endif %}" placeholder="0.00">
+	<input id="venta_sistema" type="number" step="0.01" name="venta_sistema" value="{% if cierre and ('venta_sistema' in locked_fields or 'venta_sistema' in draft_fields or cierre.venta_sistema_guardada or is_admin_general or is_historical) and cierre.venta_sistema is not none %}{{ '%.2f'|format(cierre.venta_sistema) }}{% endif %}" placeholder="0.00">
 	</fieldset>
 
 	<button type="button" class="section-save-hint" disabled>Se guarda con el botón Guardar</button>
@@ -161,7 +162,7 @@
 		<fieldset {% if not is_admin_general and (not audit_enabled or delivered_locked) %}disabled{% endif %}>
 			<div class="grid-2 audit-fields">
 				<div class="recommendation-box"><label>Recomendación - Efectivo a entregar</label><strong id="recomendado-efectivo">{{ '%.2f'|format((efectivo|default(0)) - (expected_base|default(0))) }}</strong><small>Efectivo - Monto Inicial Base Esperado</small></div>
-				<div class="field-with-icon"><label for="efectivo_entregado">Efectivo entregado</label><div class="canal-control"><img class="canal-icon" src="{{ url_for('static', filename='img/efectivo_entregado.png') }}" alt="Efectivo entregado"><input id="efectivo_entregado" type="number" step="0.01" name="efectivo_entregado" value="{% if cierre and ('efectivo_entregado' in locked_fields or cierre.efectivo_entregado_guardado or is_admin_general or is_historical) and cierre.efectivo_entregado is not none %}{{ '%.2f'|format(cierre.efectivo_entregado) }}{% endif %}" placeholder="0.00"></div></div>
+				<div class="field-with-icon"><label for="efectivo_entregado">Efectivo entregado</label><div class="canal-control"><img class="canal-icon" src="{{ url_for('static', filename='img/efectivo_entregado.png') }}" alt="Efectivo entregado"><input id="efectivo_entregado" type="number" step="0.01" name="efectivo_entregado" value="{% if cierre and ('efectivo_entregado' in locked_fields or 'efectivo_entregado' in draft_fields or cierre.efectivo_entregado_guardado or is_admin_general or is_historical) and cierre.efectivo_entregado is not none %}{{ '%.2f'|format(cierre.efectivo_entregado) }}{% endif %}" placeholder="0.00"></div></div>
 			</div>
 		</fieldset>
 		<button type="button" class="section-save-hint" disabled>Se guarda con el botón Guardar</button>
@@ -175,7 +176,7 @@
 		<fieldset {% if not is_admin_general and (not (cierre and cierre.efectivo_entregado_guardado) or left_locked) %}disabled{% endif %}>
 			<div class="grid-2 left-cash-fields">
 				<div class="recommendation-box"><label>Efectivo dejado en caja (Recomendado)</label><strong id="efectivo-dejado-recomendado">{{ '%.2f'|format(cierre.efectivo_dejado_caja_recomendado if cierre else ((efectivo|default(0)) - (cierre.efectivo_entregado if cierre else 0))) }}</strong></div>
-				<div class="field-with-icon"><label for="efectivo_dejado_caja_real">Efectivo dejado en caja (Real)</label><div class="canal-control"><img class="canal-icon" src="{{ url_for('static', filename='img/efectivo_dejado_caja.png') }}" alt="Efectivo dejado en caja"><input id="efectivo_dejado_caja_real" type="number" step="0.01" name="efectivo_dejado_caja_real" value="{% if cierre and ('efectivo_dejado_caja_real' in locked_fields or cierre.efectivo_dejado_guardado or is_admin_general or is_historical) and cierre.efectivo_dejado_caja_real is not none %}{{ '%.2f'|format(cierre.efectivo_dejado_caja_real) }}{% endif %}" placeholder="0.00"></div></div>
+				<div class="field-with-icon"><label for="efectivo_dejado_caja_real">Efectivo dejado en caja (Real)</label><div class="canal-control"><img class="canal-icon" src="{{ url_for('static', filename='img/efectivo_dejado_caja.png') }}" alt="Efectivo dejado en caja"><input id="efectivo_dejado_caja_real" type="number" step="0.01" name="efectivo_dejado_caja_real" value="{% if cierre and ('efectivo_dejado_caja_real' in locked_fields or 'efectivo_dejado_caja_real' in draft_fields or cierre.efectivo_dejado_guardado or is_admin_general or is_historical) and cierre.efectivo_dejado_caja_real is not none %}{{ '%.2f'|format(cierre.efectivo_dejado_caja_real) }}{% endif %}" placeholder="0.00"></div></div>
 			</div>
 			<div id="diferencia-efectivo-dejado" class="status-pill">Diferencia: {{ '%.2f'|format(cierre.diferencia_efectivo_dejado if cierre else 0) }}</div>
 		</fieldset>
@@ -314,7 +315,9 @@
 		var captureTarget = document.getElementById('arqueo-capture');
 		var saveBtn = document.getElementById('arqueo-save-btn');
 		var saveStatus = document.getElementById('arqueo-save-status');
-		var dirtyFields = new Set();
+		var dirtyFields = new Set({{ draft_fields|tojson }});
+		var dirtyRevision = 0;
+		var saveInProgress = false;
 		var lockedFields = new Set({{ locked_fields_json|safe }});
 		var ventaSistemaGuardada = {{ 'true' if cierre and cierre.venta_sistema_guardada else 'false' }};
 		var auditEnabled = {{ 'true' if audit_enabled else 'false' }};
@@ -504,6 +507,10 @@
 		}
 
 		function saveChanged(eventName) {
+			clearTimeout(autosaveTimer);
+			if (saveInProgress) return Promise.resolve();
+			var sentRevision = dirtyRevision;
+			var isAutosave = eventName === 'AUTOGUARDADO_5MIN';
 			var fields = collectChangedFields();
 			if (!Object.keys(fields).length) {
 				setStatus('No hay cambios pendientes.');
@@ -527,6 +534,7 @@
 				}
 			}
 
+			saveInProgress = true;
 			if (saveBtn) saveBtn.disabled = true;
 			setStatus(eventName === 'AUTOGUARDADO_5MIN' ? 'Autoguardando...' : 'Guardando...');
 			return fetch({{ url_for("arqueo", sede=target_sede_id, turno=target_turno_id)|tojson }}, {
@@ -538,7 +546,7 @@
 				if (!response.ok) throw new Error('HTTP ' + response.status);
 				return response.json();
 			}).then(function (data) {
-				if (data && data.queued) { dirtyFields.clear(); setStatus('Guardado en este dispositivo · pendiente de sincronización'); return; }
+				if (data && data.queued) { setStatus('Guardado en este dispositivo · pendiente de sincronización'); return; }
 				if (!data || data.ok === false) {
 					throw new Error((data && data.message) || 'No se pudo confirmar el guardado.');
 				}
@@ -550,26 +558,27 @@
 				updateGastosState(data.gastos);
 				renderHistorial(data.logs);
 				updateSummary();
-				dirtyFields.clear();
-				setStatus(data.message || 'Guardado correctamente.');
+				if (!isAutosave && dirtyRevision === sentRevision) dirtyFields.clear();
+				setStatus(isAutosave ? 'Borrador guardado. Puedes seguir editando; pulsa Guardar para confirmar.' : (data.message || 'Guardado correctamente.'));
 				if (Object.prototype.hasOwnProperty.call(fields, 'efectivo_dejado_caja_real') || data.closure_complete) showSuccessToast();
 			}).catch(function (error) {
 				setStatus((error && error.message) || 'No se pudo guardar. Revisa la conexión e inténtalo nuevamente.');
 			}).finally(function () {
+				saveInProgress = false;
 				if (saveBtn) saveBtn.disabled = false;
 			});
 		}
 
 		function markDirty(name) {
 			if (!lockedFields.has(name) || isAdminGeneral) dirtyFields.add(name);
+			dirtyRevision += 1;
 			clearTimeout(autosaveTimer);
-			autosaveTimer = setTimeout(function () { saveChanged('AUTOGUARDADO_5MIN'); }, 600);
+			autosaveTimer = setTimeout(function () { saveChanged('AUTOGUARDADO_5MIN'); }, 5 * 60 * 1000);
 		}
 
 		document.querySelectorAll('input, select, textarea').forEach(function (element) {
 			if (element.name && element.name !== 'section' && element.name !== 'gasto_tipo[]' && element.name !== 'gasto_nombre[]' && element.name !== 'gasto_monto[]') {
 				element.addEventListener('input', function () { markDirty(element.name); });
-				if (element.name === 'efectivo_entregado') element.addEventListener('focus', function () { markDirty(element.name); });
 			}
 			if (element.name && element.closest('#gastos-list')) {
 				element.addEventListener('input', function () { markDirty('gastos'); });

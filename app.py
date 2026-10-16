@@ -11,6 +11,7 @@ from io import BytesIO
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from collections import defaultdict
+from math import isfinite
 from flask import g, has_request_context, Flask, abort, flash, jsonify, redirect, render_template, request, send_file, send_from_directory, url_for, session
 from flask_login import LoginManager, current_user, login_required, login_user, logout_user
 from dotenv import load_dotenv
@@ -624,6 +625,14 @@ def _extract_fields_from_form(form_data):
 	return fields
 
 
+def _gasto_has_amount(item):
+	try:
+		value = float(item.get('monto'))
+		return isfinite(value) and value >= 0
+	except (TypeError, ValueError):
+		return False
+
+
 def _process_arqueo_save(cierre, payload, is_admin_general, current_user, target_sede_id):
 	fields = payload.get('fields') or {}
 	is_autosave = payload.get('event') == 'AUTOGUARDADO_5MIN'
@@ -650,9 +659,10 @@ def _process_arqueo_save(cierre, payload, is_admin_general, current_user, target
 		old_value = getattr(cierre, field)
 		new_value = _safe_float(raw_value, old_value or 0.0)
 		setattr(cierre, field, new_value)
-		locked_fields.add(field)
+		if not is_autosave:
+			locked_fields.add(field)
 		_audit(field, old_value, new_value)
-		if field == 'venta_sistema':
+		if field == 'venta_sistema' and not is_autosave:
 			cierre.venta_sistema_guardada = True
 
 	if 'observaciones' in fields:
@@ -672,8 +682,9 @@ def _process_arqueo_save(cierre, payload, is_admin_general, current_user, target
 		if raw_value not in ('', None) and (audit_enabled or is_admin_general):
 			old_value = cierre.efectivo_entregado
 			cierre.efectivo_entregado = _safe_float(raw_value, old_value or 0.0)
-			cierre.efectivo_entregado_guardado = True
-			locked_fields.add('efectivo_entregado')
+			if not is_autosave:
+				cierre.efectivo_entregado_guardado = True
+				locked_fields.add('efectivo_entregado')
 			_audit('efectivo_entregado', old_value, cierre.efectivo_entregado)
 
 	if 'efectivo_dejado_caja_real' in fields and (('efectivo_dejado_caja_real' not in locked_fields) or is_admin_general):
@@ -684,8 +695,9 @@ def _process_arqueo_save(cierre, payload, is_admin_general, current_user, target
 			cierre.efectivo_dejado_caja_recomendado = recommended
 			cierre.efectivo_dejado_caja_real = _safe_float(raw_value, old_value or 0.0)
 			cierre.diferencia_efectivo_dejado = cierre.efectivo_dejado_caja_real - recommended
-			cierre.efectivo_dejado_guardado = True
-			locked_fields.add('efectivo_dejado_caja_real')
+			if not is_autosave:
+				cierre.efectivo_dejado_guardado = True
+				locked_fields.add('efectivo_dejado_caja_real')
 			_audit('efectivo_dejado_caja_real', old_value, cierre.efectivo_dejado_caja_real)
 
 	if 'gastos' in fields:
@@ -697,6 +709,7 @@ def _process_arqueo_save(cierre, payload, is_admin_general, current_user, target
 		current_gastos, _ = _normalizar_gastos_arqueo(current_gastos)
 
 		if is_admin_general:
+			confirmed_ids = {str(g.get('id')) for g in current_gastos if g.get('bloqueado')}
 			new_gastos_list = []
 			for idx, item in enumerate(incoming):
 				monto = _safe_float(item.get('monto'), 0.0)
@@ -708,15 +721,18 @@ def _process_arqueo_save(cierre, payload, is_admin_general, current_user, target
 						'id': item_id,
 						'tipo': tipo,
 						'nombre': nombre,
-						'monto': monto,
-						'bloqueado': True,
+						'monto': monto if _gasto_has_amount(item) else None,
+						'bloqueado': (is_autosave and item_id in confirmed_ids) or (not is_autosave and _gasto_has_amount(item)),
 					})
 			cierre.gastos_json = json.dumps(new_gastos_list, ensure_ascii=True)
 			gastos_antes, gastos_despues = _cambios_gastos_arqueo(current_gastos, new_gastos_list)
 			if gastos_antes or gastos_despues:
 				_audit('gastos', gastos_antes, gastos_despues)
 		else:
-			by_id = {str(item.get('id')): dict(item) for item in current_gastos if item.get('id') is not None}
+			# Los borradores omitidos se pueden quitar; los gastos confirmados se conservan.
+			incoming_ids = {str(item.get('id')) for item in incoming if item.get('id') is not None}
+			by_id = {str(item.get('id')): dict(item) for item in current_gastos
+				if item.get('id') is not None and (item.get('bloqueado') or str(item.get('id')) in incoming_ids)}
 			for idx, item in enumerate(incoming):
 				monto = _safe_float(item.get('monto'), 0.0)
 				nombre = str(item.get('nombre') or '').strip()
@@ -728,7 +744,7 @@ def _process_arqueo_save(cierre, payload, is_admin_general, current_user, target
 					existing = by_id[item_id]
 					if existing.get('bloqueado'):
 						# Sólo la propina puede aumentar y únicamente antes del cierre definitivo.
-						if (existing.get('tipo') == 'Propina' or tipo == 'Propina') and not cierre.efectivo_dejado_guardado:
+						if not is_autosave and existing.get('tipo') == 'Propina' and not cierre.efectivo_dejado_guardado:
 							prev_monto = _safe_float(existing.get('monto'), 0.0)
 							if monto >= prev_monto:
 								existing['monto'] = monto
@@ -737,15 +753,15 @@ def _process_arqueo_save(cierre, payload, is_admin_general, current_user, target
 					else:
 						existing['tipo'] = tipo
 						existing['nombre'] = nombre
-						existing['monto'] = monto
-						existing['bloqueado'] = True
+						existing['monto'] = monto if _gasto_has_amount(item) else None
+						existing['bloqueado'] = not is_autosave and _gasto_has_amount(item)
 				else:
 					by_id[item_id] = {
 						'id': item_id,
 						'tipo': tipo,
 						'nombre': nombre,
-						'monto': monto,
-						'bloqueado': True,
+						'monto': monto if _gasto_has_amount(item) else None,
+						'bloqueado': not is_autosave and _gasto_has_amount(item),
 					}
 			cierre.gastos_json = json.dumps(list(by_id.values()), ensure_ascii=True)
 			gastos_finales = list(by_id.values())
@@ -3779,6 +3795,12 @@ def create_app():
 		historial_auditoria = []
 		if cierre:
 			historial_auditoria = _historial_arqueo_por_alcance(cierre)
+		draft_fields = []
+		if cierre:
+			draft_fields = [row[0] for row in db.session.query(ArqueoCajaHistorial.campo_o_seccion_afectada).filter(
+				ArqueoCajaHistorial.id_arqueo == cierre.id_arqueo,
+				ArqueoCajaHistorial.tipo_evento == 'AUTOGUARDADO_5MIN',
+			).distinct().all() if row[0] not in locked_fields]
 
 		sedes_disponibles = []
 		turnos_disponibles = []
@@ -3806,6 +3828,7 @@ def create_app():
 			is_admin_general=is_admin_general,
 			is_historical=selected_date < _get_operation_date().date(),
 			locked_fields=locked_fields,
+			draft_fields=draft_fields,
 			audit_enabled=audit_enabled,
 				can_insert=current_user.can_write('arqueo', 'insert'),
 			can_update=current_user.can_write('arqueo', 'update'),

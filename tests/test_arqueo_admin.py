@@ -195,6 +195,139 @@ class TestArqueoAdmin(unittest.TestCase):
             assert.deepEqual(collectChangedFields(), {});
         """)
 
+    def autosave(self, fields, client=None, url='/arqueo'):
+        response = (client or self.sala).post(url, json={'fields': fields, 'event': 'AUTOGUARDADO_5MIN'},
+                                             headers={'X-CSRFToken': 'test-token'})
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json['ok'])
+        return response.json
+
+    def test_autosave_keeps_amounts_editable_until_manual_save(self):
+        first = self.autosave({'pos_tarjetas': '1', 'venta_sistema': '2'})
+        self.assertEqual(first['locked_fields'], [])
+        self.assertFalse(first['venta_sistema_guardada'])
+        self.assertFalse(first['audit_enabled'])
+        self.autosave({'pos_tarjetas': '125.50', 'venta_sistema': '250'})
+        with patch('app._get_operation_date', return_value=datetime(2026, 9, 16)):
+            page = self.sala.get('/arqueo').get_data(as_text=True)
+        self.assertIn('name="pos_tarjetas" value="125.50"', page)
+        self.assertIn('name="venta_sistema" value="250.00"', page)
+        drafts = re.search(r'var dirtyFields = new Set\((\[.*?\])\)', page).group(1)
+        self.assertEqual(set(json.loads(drafts)), {'pos_tarjetas', 'venta_sistema'})
+        saved = self.save(self.sala, '/arqueo', {'pos_tarjetas': '125.50', 'venta_sistema': '250'})
+        self.assertIn('pos_tarjetas', saved['locked_fields'])
+        self.assertTrue(saved['audit_enabled'])
+
+    def test_expense_name_does_not_lock_before_amount_is_entered(self):
+        expense = {'id': 'draft-expense', 'tipo': 'Comida', 'nombre': 'Cena', 'monto': ''}
+        for save in (self.autosave, lambda fields: self.save(self.sala, '/arqueo', fields)):
+            saved = save({'gastos': [expense]})
+            self.assertFalse(saved['gastos'][0]['bloqueado'])
+            self.assertIsNone(saved['gastos'][0]['monto'])
+        page = self.sala.get('/arqueo').get_data(as_text=True)
+        self.assertIn('name="gasto_monto[]" value=""', page)
+        expense['monto'] = '19.50'
+        saved = self.autosave({'gastos': [expense]})
+        self.assertEqual(saved['gastos'][0]['monto'], 19.50)
+        self.assertFalse(saved['gastos'][0]['bloqueado'])
+        saved = self.save(self.sala, '/arqueo', {'gastos': [expense]})
+        self.assertTrue(saved['gastos'][0]['bloqueado'])
+
+    def test_autosave_does_not_confirm_cash_delivery_or_close_cash(self):
+        self.save(self.sala, '/arqueo', {'efectivo': '200', 'venta_sistema': '200'})
+        saved = self.autosave({'efectivo_entregado': '1'})
+        self.assertFalse(saved['efectivo_entregado_guardado'])
+        self.assertNotIn('efectivo_entregado', saved['locked_fields'])
+        self.save(self.sala, '/arqueo', {'efectivo_entregado': '150'})
+        saved = self.autosave({'efectivo_dejado_caja_real': '5'})
+        self.assertFalse(saved['closure_complete'])
+        self.assertFalse(saved['efectivo_dejado_guardado'])
+        saved = self.save(self.sala, '/arqueo', {'efectivo_dejado_caja_real': '50'})
+        self.assertTrue(saved['closure_complete'])
+
+    def test_draft_expense_can_be_removed_but_confirmed_expense_is_preserved(self):
+        confirmed = {'id': 'confirmed', 'tipo': 'Comida', 'nombre': 'Cena', 'monto': '20'}
+        self.save(self.sala, '/arqueo', {'gastos': [confirmed]})
+        draft = {'id': 'draft', 'tipo': 'Otros', 'nombre': 'En proceso', 'monto': ''}
+        self.autosave({'gastos': [confirmed, draft]})
+        saved = self.autosave({'gastos': []})
+        self.assertEqual([g['id'] for g in saved['gastos']], ['confirmed'])
+        self.assertTrue(saved['gastos'][0]['bloqueado'])
+
+    def test_autosave_does_not_change_confirmed_amounts_or_tips(self):
+        tip = {'id': 'tip', 'tipo': 'Propina', 'nombre': 'Propina', 'monto': '10'}
+        self.save(self.sala, '/arqueo', {'pos_tarjetas': '100', 'gastos': [tip]})
+        tip['monto'] = '150'
+        saved = self.autosave({'pos_tarjetas': '999', 'gastos': [tip]})
+        self.assertEqual(saved['gastos'][0]['monto'], 10)
+        with self.app.app_context():
+            self.assertEqual(ArqueoCaja.query.one().pos_tarjetas, 100)
+        tip['monto'] = '15'
+        saved = self.save(self.sala, '/arqueo', {'gastos': [tip]})
+        self.assertEqual(saved['gastos'][0]['monto'], 15)
+
+    def test_admin_autosave_preserves_expense_confirmation(self):
+        expense = {'id': 'confirmed', 'tipo': 'Comida', 'nombre': 'Cena', 'monto': '20'}
+        self.save(self.sala, '/arqueo', {'gastos': [expense]})
+        saved = self.autosave({'gastos': [expense]}, client=self.general, url='/arqueo?sede=2&turno=NOCHE')
+        self.assertTrue(saved['gastos'][0]['bloqueado'])
+
+    def test_typing_schedules_five_minute_draft_without_saving_on_focus(self):
+        body = self.template.split('function markDirty(name) {', 1)[1].split("document.querySelectorAll('input, select, textarea')", 1)[0]
+        self.run_js("""
+            const assert = require('node:assert/strict');
+            let dirtyFields = new Set(), lockedFields = new Set(), isAdminGeneral = false;
+            let autosaveTimer, dirtyRevision = 0, delay, callback, eventName;
+            function clearTimeout() {}
+            function setTimeout(fn, milliseconds) { callback = fn; delay = milliseconds; return 1; }
+            function saveChanged(event) { eventName = event; }
+            function markDirty(name) {""" + body + """
+            markDirty('gastos');
+            assert.equal(delay, 300000);
+            assert.equal(dirtyRevision, 1);
+            assert(dirtyFields.has('gastos'));
+            assert.equal(eventName, undefined);
+            callback();
+            assert.equal(eventName, 'AUTOGUARDADO_5MIN');
+        """)
+        self.assertNotIn("addEventListener('focus', function () { markDirty", self.template)
+
+    def test_late_autosave_response_preserves_changes_typed_while_saving(self):
+        body = self.template.split('function saveChanged(eventName) {', 1)[1].split('function markDirty(name)', 1)[0]
+        body = re.sub(r'\{\{ url_for\("arqueo".*?\}\}', '"/arqueo"', body)
+        self.run_js("""
+            const assert = require('node:assert/strict');
+            let dirtyFields = new Set(['gastos']), dirtyRevision = 1, saveInProgress = false;
+            let autosaveTimer, isAdminGeneral = true, ventaSistemaGuardada, auditEnabled;
+            let efectivoEntregadoGuardado, efectivoDejadoGuardado, release;
+            const saveBtn = {disabled: false};
+            function clearTimeout() {}
+            function collectChangedFields() { return {gastos: [{id: 'g1', nombre: 'Cena', monto: '1'}]}; }
+            function setStatus() {}
+            function lockSavedFields() {}
+            function updateGastosState() {}
+            function renderHistorial() {}
+            function updateSummary() {}
+            function showSuccessToast() {}
+            function fetch() { return new Promise(resolve => { release = resolve; }); }
+            function saveChanged(eventName) {""" + body + """
+            (async () => {
+                let saving = saveChanged('AUTOGUARDADO_5MIN');
+                assert.equal(saveInProgress, true);
+                dirtyFields.add('pos_tarjetas'); dirtyRevision++;
+                release({ok: true, json: async () => ({ok: true, locked_fields: [], gastos: []})});
+                await saving;
+                assert(dirtyFields.has('pos_tarjetas'));
+                assert(dirtyFields.has('gastos'));
+                assert.equal(saveInProgress, false);
+                saving = saveChanged('GUARDADO_MANUAL');
+                release({ok: true, json: async () => ({ok: true, locked_fields: [], gastos: []})});
+                await saving;
+                assert.equal(dirtyFields.size, 0);
+                assert.equal(saveBtn.disabled, false);
+            })().catch(error => { console.error(error); process.exitCode = 1; });
+        """)
+
     def test_rendered_javascript_syntax_for_both_roles(self):
         for client in (self.general, self.sala):
             page = client.get('/arqueo?sede=2&turno=NOCHE').get_data(as_text=True)
